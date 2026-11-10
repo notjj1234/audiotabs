@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+venv/
+*.egg-info/
+.env
+data/
+output/
+.cache/
+
+# OS
+.DS_Store
+
+# Models / large artifacts
+*.wav
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+checkpoints/
+dist/
+/build/
+
+# Editor / caches
+.vscode/
+.pytest_cache/
+.ruff_cache/
+.streamlit/credentials.toml
+.cursor/
