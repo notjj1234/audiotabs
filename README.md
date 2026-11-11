@@ -2,60 +2,129 @@
 
 Dedicated app for **Tab PDF**: audio (or YouTube URL) → optional guitar stem separation → MIDI → ASCII tab / PDF.
 
-Seeded from the standalone Tab PDF app (`jj_audio_to_tab`), which was copied from the Tab PDF surface of `jj_audio_website`. Both of those stay unchanged; this repo evolves on its own.
+<p align="center">
+  <img src="https://via.placeholder.com/160/a8a8a8/ffffff?text=Tab+PDF" alt="Tab PDF" width="160">
+</p>
 
-## Requirements
+<p align="center">
+  Convert audio to guitar tab PDF (standalone Tab PDF app).
+</p>
 
-- Python **3.10–3.12** (3.11 recommended; Basic Pitch needs `<3.13`)
-- Optional: Demucs / RoFormer extras for full-mix guitar separation
+<p align="center">
+  Seeded from the standalone Tab PDF app (`jj_audio_to_tab`), which was copied from the Tab PDF surface of `jj_audio_website`. Both of those stay unchanged; this repo evolves on its own.
+</p>
 
-## Setup
+<p align="center">
+  <a href="DESKTOP.md"><img src="https://img.shields.io/badge/Desktop-🖥️-6f42c1" alt="Desktop"></a>
+  <a href="DEPLOY.md"><img src="https://img.shields.io/badge/Deploy-🌐-6f42c1" alt="Deploy"></a>
+  <a href="#quickstart"><img src="https://img.shields.io/badge/Quickstart-⚡-6f42c1" alt="Quickstart"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/Contribute-🤝-6f42c1" alt="Contribute"></a>
+</p>
 
-```bash
-cd audiotabs
-python3.11 -m venv .venv311
-source .venv311/bin/activate
-pip install -U pip
-pip install -e ".[dev]"
-# Optional stem separation:
-pip install -e ".[demucs]"
-# Optional cleaner guitar engine:
-pip install -e ".[roformer,separator]"
-```
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
+  <img src="https://img.shields.io/badge/python-3.10–3.12-blue" alt="Python 3.10–3.12">
+  <img src="https://img.shields.io/badge/platform-macOS%20|%20Windows-lightgrey" alt="Platform: macOS and Windows">
+</p>
 
-Or: `make install` (includes demucs).
+---
 
-## Run the UI
+## Quickstart
 
-```bash
-make ui
-# or: PYTHONPATH=src:. streamlit run ui/app.py
-```
-
-Upload a short solo-guitar clip (or paste a public YouTube URL), then **Convert to tab PDF**.
-
-## CLI
+From a clone:
 
 ```bash
-audio-pipeline --audio path/to/clip.wav -o ./output --no-separate
-audio-mid2tab --midi path/to/notes.mid -o ./out.tab
-audio-tab2pdf --tab path/to/out.tab -o ./out.pdf
-```
-
-## Tests
-
-```bash
+make install
 make test
 ```
 
-## Layout
+On Windows:
 
-| Path | Role |
-|---|---|
-| `src/audio_to_tab/` | Engine (pipeline, transcribe, tab, PDF, separation) |
-| `ui/` | Streamlit Tab PDF UI |
-| `tests/` | Unit tests for included modules |
+```powershell
+.\scripts\dev.ps1 install
+.\scripts\dev.ps1 test
+```
 
-## License
+---
 
-MIT (same family as the source package).
+## Tester
+
+**Windows CPU**
+```powershell
+$env:AUDIO_TOOLS_EDITION = "cpu"
+.\.venv311\Scripts\python.exe packaging/launcher.py
+```
+
+**Windows GPU**
+```powershell
+$env:AUDIO_TOOLS_EDITOR = "cuda"
+.\.venv-desktop\Scripts\python.exe packaging/launcher.py
+```
+
+**macOS (Apple Silicon / Intel)**
+```bash
+python3.11 -m venv .venv311
+source .venv311/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[demucs,desktop,roformer,separator]"
+
+.venv311/bin/python packaging/launcher.py
+```
+
+---
+
+## About
+
+- **Desktop** runs on this computer: Streamlit in `ui/`, started by `packaging/launcher.py`. No Docker.
+- **Website** is the hosted app: FastAPI in `backend/` plus the React app in `web/`.
+- **Shared engine** lives in `src/audio_to_tab/` (import as `audio_to_tab`).
+
+Python **3.11** (3.10–3.12 only). Desktop installers and the tester app: [DESKTOP.md](DESKTOP.md). Hosted deploy: [DEPLOY.md](DEPLOY.md).
+
+## Table of contents
+
+- [Quickstart](#quickstart)
+- [Tester](#tester)
+- [About](#about)
+
+## Quickstart
+
+From a clone:
+
+```bash
+make install
+make test
+```
+
+On Windows:
+
+```powershell
+.\scripts\dev.ps1 install
+.\scripts\dev.ps1 test
+```
+
+---
+
+## Tester
+
+**Windows CPU**
+```powershell
+$env:AUDIO_TOOLS_EDITOR = "cpu"
+.\.venv311\Scripts\python.exe packaging/launcher.py
+```
+
+**Windows GPU**
+```powershell
+$env:AUDIO_TOOLS_EDITOR = "cuda"
+.\.venv-desktop\Scripts\python.exe packaging/launcher.py
+```
+
+**macOS (Apple Silicon / Intel)**
+```bash
+python3.11 -m venv .venv311
+source .venv311/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[demucs,desktop,roformer,separator]"
+
+.venv311/bin/python packaging/launcher.py
+```
