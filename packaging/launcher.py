@@ -26,6 +26,17 @@ HEALTH_TIMEOUT_SEC = 180.0
 HEALTH_POLL_SEC = 0.3
 
 
+def window_icon() -> str | None:
+    """Prefer .ico on Windows (WinForms); PNG works on macOS/GTK."""
+    ico = REPO_ROOT / "assets" / "app-icon.ico"
+    png = REPO_ROOT / "assets" / "app-icon.png"
+    if sys.platform.startswith("win"):
+        path = ico if ico.is_file() else png
+    else:
+        path = png if png.is_file() else ico
+    return str(path) if path.is_file() else None
+
+
 def log(message: str) -> None:
     print(f"[desktop] {message}", file=sys.stderr, flush=True)
 
@@ -151,7 +162,13 @@ def main() -> int:
         except (AttributeError, TypeError):
             log("pywebview window events unavailable")
         started = time.monotonic()
-        webview.start()
+        icon = window_icon()
+        if icon:
+            log(f"Using window icon {icon}")
+            webview.start(icon=icon)
+        else:
+            log("No assets/app-icon.(png|ico); starting without custom icon")
+            webview.start()
         log(f"webview.start returned after {time.monotonic() - started:.1f}s")
         return 0
     finally:

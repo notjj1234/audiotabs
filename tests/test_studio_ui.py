@@ -50,6 +50,16 @@ def test_hero_html_is_title_only():
     assert "studio-hero" in html
     assert "<h1>Tab PDF</h1>" in html
     assert "<p>" not in html
+    assert "studio-hero-icon" not in html
+
+
+def test_hero_html_can_include_app_icon():
+    from ui.studio_shell import hero_html
+
+    html = hero_html(icon_data_uri="data:image/png;base64,AAA")
+    assert 'class="studio-hero-icon"' in html
+    assert "data:image/png;base64,AAA" in html
+    assert "<h1>Tab PDF</h1>" in html
 
 
 def test_home_page_drops_experimental_note_and_info_banner():

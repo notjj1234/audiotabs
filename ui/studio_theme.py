@@ -291,6 +291,15 @@ div[data-baseweb="input"] > div,
   margin: 12vh auto 0.85rem;
   max-width: 36rem;
 }}
+.studio-hero-icon {{
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 0.85rem;
+  border-radius: 14px;
+  object-fit: contain;
+  background: #fff;
+}}
 .studio-hero h1 {{
   margin: 0;
   font-size: 1.85rem;

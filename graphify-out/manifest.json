@@ -1,8 +1,8 @@
 {
   "packaging/launcher.py": {
-    "mtime": 1794319761.0,
-    "seen": 1794385188.656687,
-    "ast_hash": "eba7c5876ad522c852bc4ade1af44826",
+    "mtime": 1794404602.2858236,
+    "seen": 1794404655.7388759,
+    "ast_hash": "a3b66461993e1ea73f2c0b4ae8903387",
     "semantic_hash": ""
   },
   "pyproject.toml": {
@@ -246,9 +246,9 @@
     "semantic_hash": ""
   },
   "tests/test_studio_ui.py": {
-    "mtime": 1794384075.9463031,
-    "seen": 1794385188.6567218,
-    "ast_hash": "5afa228a4e54ef49900284e5b77c8516",
+    "mtime": 1794404632.2779958,
+    "seen": 1794404655.738917,
+    "ast_hash": "fc277a3d61e89a898b26f7ee81f36cdc",
     "semantic_hash": ""
   },
   "tests/test_tab.py": {
@@ -276,15 +276,15 @@
     "semantic_hash": ""
   },
   "ui/app.py": {
-    "mtime": 1794319128.0,
-    "seen": 1794385188.6567261,
-    "ast_hash": "f98656d359d8e83262bd98dc857799d4",
+    "mtime": 1794404596.3104517,
+    "seen": 1794404655.738921,
+    "ast_hash": "a089f7874353af8a738db901c0df264b",
     "semantic_hash": ""
   },
   "ui/common.py": {
-    "mtime": 1794207136.0,
-    "seen": 1794385188.6567261,
-    "ast_hash": "8e89b522187f0fd87aae7ca14958084d",
+    "mtime": 1794404652.9121585,
+    "seen": 1794404655.7389219,
+    "ast_hash": "6d106bd0d751c993125e6132a9d201b5",
     "semantic_hash": ""
   },
   "ui/guitar_engines.py": {
@@ -300,21 +300,21 @@
     "semantic_hash": ""
   },
   "ui/pages/tab_pdf.py": {
-    "mtime": 1794384972.5035036,
-    "seen": 1794385188.656728,
-    "ast_hash": "a45a14dc4cf95daeda8577f907af1ce0",
+    "mtime": 1794404626.2663064,
+    "seen": 1794404655.738924,
+    "ast_hash": "44fe52b5d26c40d3d309ccebd5dd2a7f",
     "semantic_hash": ""
   },
   "ui/studio_shell.py": {
-    "mtime": 1794384708.9213598,
-    "seen": 1794385188.656729,
-    "ast_hash": "30076e6fcaf64a4b4d6f200e4e175aec",
+    "mtime": 1794404605.500708,
+    "seen": 1794404655.738925,
+    "ast_hash": "80a7e5b9e388e5350d27c71742f06bac",
     "semantic_hash": ""
   },
   "ui/studio_theme.py": {
-    "mtime": 1794384344.4509497,
-    "seen": 1794385188.6567302,
-    "ast_hash": "1f1525c7d73d9650946aaa0b71f70109",
+    "mtime": 1794404629.0781865,
+    "seen": 1794404655.7389262,
+    "ast_hash": "2117bc30691d88e2ef7f861fba7c8cd2",
     "semantic_hash": ""
   },
   "ui/youtube_search.py": {
@@ -324,9 +324,9 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1794354038.2289288,
-    "seen": 1794385188.656731,
-    "ast_hash": "5c4431eb172fb405d71f6e4d6a04dc2b",
+    "mtime": 1794404603.3727517,
+    "seen": 1794404655.738928,
+    "ast_hash": "9218a8f7fdeaa447643e4ad98568dfab",
     "semantic_hash": ""
   },
   "docs/superpowers/plans/2026-11-10-studio-ui.md": {
@@ -345,6 +345,12 @@
     "mtime": 1794384666.1079366,
     "seen": 1794385188.656733,
     "ast_hash": "308f95edee697ec6ff1b72bfea65630d",
+    "semantic_hash": ""
+  },
+  "assets/app-icon.png": {
+    "mtime": 1794404553.3981175,
+    "seen": 1794404655.738931,
+    "ast_hash": "96124482d38e8966097a8322352596d6",
     "semantic_hash": ""
   }
 }

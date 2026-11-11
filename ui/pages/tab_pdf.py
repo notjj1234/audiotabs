@@ -12,6 +12,7 @@ import streamlit as st
 
 from ui.common import (
     AUDIO_UPLOAD_TYPES,
+    app_icon_data_uri,
     ensure_src_path,
     list_recent_runs,
     run_output_dir,
@@ -556,7 +557,7 @@ def _render_success(artifacts: dict) -> None:
 
 def _render_entry() -> None:
     _init_setup_state()
-    st.markdown(hero_html(), unsafe_allow_html=True)
+    st.markdown(hero_html(icon_data_uri=app_icon_data_uri()), unsafe_allow_html=True)
 
     demucs_ok = is_demucs_available()
     roformer_ok = is_roformer_backend_available()

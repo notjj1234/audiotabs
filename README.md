@@ -6,7 +6,7 @@
 </p>
 
 <h1 align="center">
-  <img src="https://via.placeholder.com/160/a8a8a8/ffffff?text=Tab+PDF" alt="Tab PDF" width="160">
+  <img src="assets/app-icon.png" alt="Tab PDF" width="160">
 </h1>
 
 <p align="center">

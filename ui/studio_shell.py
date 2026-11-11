@@ -12,9 +12,16 @@ _STATE_WORDS = {
 }
 
 
-def hero_html() -> str:
-    return """
+def hero_html(*, icon_data_uri: str | None = None) -> str:
+    icon = ""
+    if icon_data_uri:
+        icon = (
+            f'<img class="studio-hero-icon" src="{escape(icon_data_uri, quote=True)}" '
+            'alt="" width="72" height="72">'
+        )
+    return f"""
 <div class="studio-hero">
+  {icon}
   <h1>Tab PDF</h1>
 </div>
 """

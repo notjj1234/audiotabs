@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -64,6 +65,18 @@ def app_version() -> str:
     except Exception:
         logger.warning("Could not determine app version from audio_to_tab.__version__")
         return "unknown"
+
+
+def app_icon_png() -> Path:
+    return _REPO_ROOT / "assets" / "app-icon.png"
+
+
+def app_icon_data_uri() -> str | None:
+    path = app_icon_png()
+    if not path.is_file():
+        return None
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 
 def _safe_upload_name(name: str | None) -> str:
