@@ -77,3 +77,44 @@ def test_page_wires_studio_shell():
     assert "inject_studio_theme" in source
     assert "progress_card_html" in source
     assert "hero_html" in source
+
+
+def test_entry_screen_offers_two_sources():
+    """Screen 1 is one card with two rows: upload audio, then search YouTube.
+
+    A URL field on the entry screen would bring paste-and-fetch back; the
+    search dialog owns the URL, the disclaimer, and its errors.
+    """
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    entry_at = source.find('key="tab_source_entry"')
+    assert entry_at != -1
+    upload_at = source.find("st.file_uploader(")
+    youtube_at = source.find('key="tab_youtube_search_open_btn"')
+    assert upload_at != -1 and youtube_at != -1
+    assert upload_at < youtube_at
+    assert 'st.text_input("Or paste a YouTube URL")' not in source
+    assert "@st.dialog(\"Search YouTube\"" in source
+    assert "search_youtube_videos(" in source
+    dialog = source[source.find("def _youtube_search_dialog") : source.find("def _render_player")]
+    assert "st.caption(YOUTUBE_DISCLAIMER)" in dialog
+    assert "st.warning(" in dialog
+    assert "if continue_ok and st.button(" in source
+    assert "disabled=not continue_ok" not in source
+
+
+def test_entry_screen_css_has_one_hierarchy():
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    tile = css[css.find("Tab PDF entry:") :]
+    assert tile
+    assert "tab_source_entry" in tile
+    assert "36rem" in tile
+    assert "min-height: 5.5rem" in tile
+    assert "min-height: 3.5rem" in tile
+    assert "1px solid" in tile
+    assert "1px dashed" not in tile
+    assert "Upload audio" in tile
+    assert "MP3, WAV, M4A, FLAC" in tile
+    assert "Public videos only" in tile

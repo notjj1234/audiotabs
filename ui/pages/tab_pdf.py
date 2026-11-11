@@ -32,7 +32,13 @@ ensure_src_path()
 
 from audio_to_tab.chords import ChordHit  # noqa: E402
 from audio_to_tab.hardware import get_desktop_probe, lite_accelerator_available  # noqa: E402
-from audio_to_tab.ingest import YouTubeDownloadError, is_youtube_url  # noqa: E402
+from audio_to_tab.ingest import (  # noqa: E402
+    YouTubeDownloadError,
+    YouTubeSearchError,
+    format_youtube_duration,
+    is_youtube_url,
+    search_youtube_videos,
+)
 from audio_to_tab.lyrics import LyricLine  # noqa: E402
 from audio_to_tab.notation_view import (  # noqa: E402
     align_chords_to_lyrics,
@@ -53,13 +59,18 @@ from audio_to_tab.separate import guitar_ft_weights_path, is_demucs_available  #
 from audio_to_tab.tab_bundle import (  # noqa: E402
     bundle_chords,
     download_menu,
-    format_size_kb,
     key_for_midi,
     show_convert_action,
     tab_document_for,
     write_tab_exports,
 )
 from audio_to_tab.tuning import TUNING_PRESETS  # noqa: E402
+from ui.youtube_search import (  # noqa: E402
+    PAGE_SIZE,
+    hit_meta,
+    hit_state,
+    normalize_page,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +81,127 @@ DEMUCS_INSTALL_HINT = (
     'Demucs is required for stem separation. Install with: pip install -e ".[demucs]"'
 )
 _PLAYER_BYTE_CAP = 24 * 1024 * 1024
+
+_YOUTUBE_OPEN_KEY = "tab_youtube_open"
+_YOUTUBE_QUERY_KEY = "tab_youtube_query"
+_YOUTUBE_HITS_KEY = "tab_youtube_hits"
+_YOUTUBE_PAGE_KEY = "tab_youtube_page"
+_YOUTUBE_ERROR_KEY = "tab_youtube_error"
+_YOUTUBE_URL_KEY = "tab_youtube_url"
+_YOUTUBE_TITLE_KEY = "tab_youtube_title"
+_YOUTUBE_DURATION_KEY = "tab_youtube_duration"
+
+
+def _close_youtube_search() -> None:
+    st.session_state[_YOUTUBE_OPEN_KEY] = False
+
+
+def _run_youtube_search(query: str, page: int) -> None:
+    """Fetch one page of public results; errors stay inside the dialog."""
+    page = normalize_page(page)
+    st.session_state[_YOUTUBE_PAGE_KEY] = page
+    st.session_state.pop(_YOUTUBE_ERROR_KEY, None)
+    try:
+        hits = search_youtube_videos(
+            query,
+            max_results=PAGE_SIZE,
+            offset=(page - 1) * PAGE_SIZE,
+        )
+    except (YouTubeSearchError, ValueError) as exc:
+        st.session_state[_YOUTUBE_HITS_KEY] = []
+        st.session_state[_YOUTUBE_ERROR_KEY] = str(exc)
+        return
+    st.session_state[_YOUTUBE_HITS_KEY] = [hit_state(hit) for hit in hits]
+
+
+def _select_youtube_hit(hit: dict) -> None:
+    st.session_state[_YOUTUBE_URL_KEY] = str(hit.get("url") or "")
+    st.session_state[_YOUTUBE_TITLE_KEY] = str(hit.get("title") or "")
+    st.session_state[_YOUTUBE_DURATION_KEY] = hit.get("duration_sec")
+    _close_youtube_search()
+
+
+@st.dialog("Search YouTube", width="large", on_dismiss=_close_youtube_search)
+def _youtube_search_dialog() -> None:
+    """Modal: search public videos, then use one as the conversion source."""
+    st.caption("Public videos only. Pick a video, then convert it to tab.")
+    st.caption(YOUTUBE_DISCLAIMER)
+    with st.form("tab_youtube_search_form", clear_on_submit=False, border=False):
+        search_cols = st.columns([4, 1], vertical_alignment="bottom")
+        with search_cols[0]:
+            query = st.text_input(
+                "Song or artist",
+                key=_YOUTUBE_QUERY_KEY,
+                placeholder="e.g. artist, song title",
+            )
+        with search_cols[1]:
+            submitted = st.form_submit_button("Search", type="primary", width="stretch")
+    if submitted:
+        _run_youtube_search(query, 1)
+
+    error = st.session_state.get(_YOUTUBE_ERROR_KEY)
+    if error:
+        st.warning(str(error))
+
+    page = normalize_page(st.session_state.get(_YOUTUBE_PAGE_KEY, 1))
+    hits = st.session_state.get(_YOUTUBE_HITS_KEY) or []
+    if not isinstance(hits, list):
+        hits = []
+    if hits:
+        start = (page - 1) * PAGE_SIZE
+        st.caption(f"Showing {start + 1}–{start + len(hits)}")
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            video_id = str(hit.get("video_id") or "")
+            url = str(hit.get("url") or "").strip()
+            title = str(hit.get("title") or "Untitled")
+            with st.container(border=True):
+                info, action = st.columns([5, 1], vertical_alignment="center")
+                with info:
+                    st.markdown(f"**{title}**")
+                    meta = hit_meta(hit)
+                    if meta:
+                        st.caption(meta)
+                with action:
+                    if st.button(
+                        "Use",
+                        key=f"tab_youtube_pick_{video_id}",
+                        type="primary",
+                        width="stretch",
+                        disabled=not url,
+                    ):
+                        _select_youtube_hit(hit)
+                        st.rerun()
+
+    if hits or page > 1:
+        nav = st.columns([1, 2, 1], vertical_alignment="center")
+        with nav[0]:
+            if st.button(
+                "Previous",
+                key="tab_youtube_prev",
+                type="secondary",
+                width="stretch",
+                disabled=page <= 1,
+            ):
+                _run_youtube_search(str(st.session_state.get(_YOUTUBE_QUERY_KEY) or ""), page - 1)
+                st.rerun()
+        with nav[2]:
+            if st.button(
+                "Next",
+                key="tab_youtube_next",
+                type="secondary",
+                width="stretch",
+                disabled=len(hits) < PAGE_SIZE,
+            ):
+                _run_youtube_search(str(st.session_state.get(_YOUTUBE_QUERY_KEY) or ""), page + 1)
+                st.rerun()
+
+    if st.button("Close", key="tab_youtube_close", type="secondary", width="stretch"):
+        _close_youtube_search()
+        st.rerun()
+
+
 def record_failure(state: dict, exc: BaseException, *, message: str | None = None) -> None:
     """Drop every download from a failed run and keep the message for the page."""
     state.pop("tab_pdf_artifacts", None)
@@ -453,7 +585,74 @@ def main() -> None:
                         st.session_state.pop("tab_pdf_export_sig", None)
                         st.rerun()
 
-    with st.expander("Conversion settings", expanded=not has_results):
+    with st.container(key="tab_source_entry"):
+        uploaded = st.file_uploader(
+            "Upload audio",
+            type=AUDIO_UPLOAD_TYPES,
+            help="MP3, WAV, M4A, or FLAC. Processing stays on this computer.",
+        )
+        if st.button(
+            "Search YouTube",
+            key="tab_youtube_search_open_btn",
+            type="secondary",
+            width="stretch",
+        ):
+            st.session_state[_YOUTUBE_OPEN_KEY] = True
+            st.rerun()
+        if st.session_state.get(_YOUTUBE_OPEN_KEY):
+            _youtube_search_dialog()
+
+        selected_url = str(st.session_state.get(_YOUTUBE_URL_KEY) or "").strip()
+        if selected_url:
+            selected_title = str(st.session_state.get(_YOUTUBE_TITLE_KEY) or "YouTube video")
+            selected_duration = format_youtube_duration(
+                st.session_state.get(_YOUTUBE_DURATION_KEY)
+            )
+            chip_cols = st.columns([4, 1, 1], vertical_alignment="center")
+            with chip_cols[0]:
+                st.markdown(f"**{selected_title}**")
+                if selected_duration:
+                    st.caption(selected_duration)
+            with chip_cols[1]:
+                if st.button(
+                    "Change",
+                    key="tab_youtube_change",
+                    type="secondary",
+                    width="stretch",
+                ):
+                    st.session_state[_YOUTUBE_OPEN_KEY] = True
+                    st.rerun()
+            with chip_cols[2]:
+                if st.button(
+                    "Remove",
+                    key="tab_youtube_remove",
+                    type="secondary",
+                    width="stretch",
+                ):
+                    for key in (_YOUTUBE_URL_KEY, _YOUTUBE_TITLE_KEY, _YOUTUBE_DURATION_KEY):
+                        st.session_state.pop(key, None)
+                    st.rerun()
+
+        if uploaded is not None:
+            st.audio(uploaded)
+        st.caption(f"{max_upload_caption()} Files are processed locally.")
+
+        convert_clicked = False
+        continue_ok = show_convert_action(
+            has_file=uploaded is not None,
+            youtube_url=selected_url,
+        )
+        if continue_ok and st.button(
+            "Convert to tab PDF",
+            type="primary",
+            key="tab_convert",
+            width="stretch",
+        ):
+            convert_clicked = True
+        elif not continue_ok:
+            st.caption("Add an audio file or search a public YouTube video.")
+
+    with st.expander("Conversion settings", expanded=False):
         title = st.text_input(
             "Tab title",
             value="Guitar Tab",
@@ -615,131 +814,111 @@ def main() -> None:
             onset_threshold = st.slider("Onset threshold", 0.3, 0.9, 0.5, 0.05)
             frame_threshold = st.slider("Frame threshold", 0.2, 0.8, 0.3, 0.05)
 
-        uploaded = st.file_uploader(
-            "Upload MP3 / WAV / FLAC / M4A",
-            type=AUDIO_UPLOAD_TYPES,
-        )
-        if uploaded is not None:
-            size = getattr(uploaded, "size", None)
-            if not isinstance(size, int):
-                size = len(uploaded.getvalue())
-            file_name = Path(str(getattr(uploaded, "name", "") or "audio")).name
-            st.text(f"{file_name}  {format_size_kb(size)}")
-            st.audio(uploaded)
-        st.caption(f"{max_upload_caption()} Files are processed locally.")
-        youtube_url = st.text_input("Or paste a YouTube URL")
-        st.caption(YOUTUBE_DISCLAIMER)
-
-        convert_clicked = False
-        if show_convert_action(has_file=uploaded is not None, youtube_url=youtube_url):
-            convert_clicked = st.button("Convert to tab PDF", type="primary")
-        else:
-            st.caption("Add an audio file or a public YouTube link.")
-
-        if convert_clicked:
-            st.session_state.pop("tab_pdf_error", None)
-            st.session_state.pop("tab_pdf_error_detail", None)
-            if not uploaded and not youtube_url.strip():
-                record_failure(
-                    st.session_state,
-                    ValueError("Upload an audio file or enter a YouTube URL."),
-                )
-                st.rerun()
-            if youtube_url.strip() and not is_youtube_url(youtube_url):
-                record_failure(st.session_state, ValueError("Only YouTube URLs are allowed."))
-                st.rerun()
-
-            effective_separate = separate_stems and can_separate
-            skipped_separation = separate_stems and not can_separate
-            output_dir = run_output_dir()
-            config = PipelineConfig(
-                separate_stems=effective_separate,
-                max_duration_sec=max_duration,
-                title=title or "Guitar Tab",
-                mix_aware_filtering=mix_aware,
-                onset_threshold=onset_threshold,
-                frame_threshold=frame_threshold,
-                tempo_bpm_override=tempo_override if tempo_override > 0 else None,
-                model=tab_model,
-                guitar_refine=tab_guitar_refine,
-                guitar_checkpoint=tab_guitar_checkpoint,
-                low_end_restore_db=tab_low_end_restore_db,
-                sub_bass_debleed=tab_sub_bass_debleed,
-                bleed_gate=tab_bleed_gate,
-                adaptive_fold_gain=tab_adaptive_fold_gain,
-                guitar_ensemble=tab_guitar_ensemble,
-                tuning_name=str(tuning_name),
-                capo=capo,
-                transpose=0,
-                bars_per_line=4,
+    if convert_clicked:
+        st.session_state.pop("tab_pdf_error", None)
+        st.session_state.pop("tab_pdf_error_detail", None)
+        if not uploaded and not selected_url.strip():
+            record_failure(
+                st.session_state,
+                ValueError("Upload an audio file or pick a YouTube video."),
             )
-            rows = new_checklist()
-            progress_slot = st.empty()
+            st.rerun()
+        if selected_url.strip() and not is_youtube_url(selected_url):
+            record_failure(st.session_state, ValueError("Only YouTube URLs are allowed."))
+            st.rerun()
+
+        effective_separate = separate_stems and can_separate
+        skipped_separation = separate_stems and not can_separate
+        output_dir = run_output_dir()
+        config = PipelineConfig(
+            separate_stems=effective_separate,
+            max_duration_sec=max_duration,
+            title=title or "Guitar Tab",
+            mix_aware_filtering=mix_aware,
+            onset_threshold=onset_threshold,
+            frame_threshold=frame_threshold,
+            tempo_bpm_override=tempo_override if tempo_override > 0 else None,
+            model=tab_model,
+            guitar_refine=tab_guitar_refine,
+            guitar_checkpoint=tab_guitar_checkpoint,
+            low_end_restore_db=tab_low_end_restore_db,
+            sub_bass_debleed=tab_sub_bass_debleed,
+            bleed_gate=tab_bleed_gate,
+            adaptive_fold_gain=tab_adaptive_fold_gain,
+            guitar_ensemble=tab_guitar_ensemble,
+            tuning_name=str(tuning_name),
+            capo=capo,
+            transpose=0,
+            bars_per_line=4,
+        )
+        rows = new_checklist()
+        progress_slot = st.empty()
+        _paint_checklist(progress_slot, rows)
+
+        def on_progress(stage: str, message: str) -> None:
+            nonlocal rows
+            rows = apply_progress(rows, stage, message)
             _paint_checklist(progress_slot, rows)
 
-            def on_progress(stage: str, message: str) -> None:
-                nonlocal rows
-                rows = apply_progress(rows, stage, message)
-                _paint_checklist(progress_slot, rows)
+        try:
+            audio_path = save_upload(uploaded) if uploaded else None
+            url = selected_url.strip() or None
+            artifacts = run_pipeline(
+                audio_path=audio_path,
+                youtube_url=url,
+                output_dir=output_dir,
+                config=config,
+                on_progress=on_progress,
+            )
+            rows = apply_progress(rows, "done", "Pipeline complete")
+            _paint_checklist(progress_slot, rows)
+            st.session_state["tab_pdf_artifacts"] = {key: str(value) for key, value in artifacts.items()}
+            st.session_state["tab_pdf_title"] = title or "Guitar Tab"
+            st.session_state["tab_pdf_skipped_separation"] = skipped_separation
+            st.session_state["tab_pdf_source_audio_path"] = str(audio_path) if audio_path else None
+            st.session_state["tab_pdf_flash"] = "Conversion complete."
+            st.session_state["tab_pdf_details"] = {
+                "onset": onset_threshold,
+                "frame": frame_threshold,
+                "mix_aware": mix_aware,
+                "separate": effective_separate,
+            }
+            st.session_state["tab_result_tuning"] = str(tuning_name)
+            st.session_state["tab_result_capo"] = int(capo)
+            st.session_state["tab_result_transpose"] = 0
+            st.session_state["tab_result_bars"] = 4
+            st.session_state["tab_pdf_export_sig"] = [str(tuning_name), int(capo), 0, 4]
+            st.session_state.pop("tab_pdf_error", None)
+            st.session_state.pop("tab_pdf_error_detail", None)
+            write_run_metadata(
+                output_dir,
+                page="tab_pdf",
+                title=title or "Guitar Tab",
+                artifacts=artifacts,
+            )
+            st.rerun()
+        except EmptyTranscriptionError as exc:
+            record_failure(st.session_state, exc)
+            st.rerun()
+        except YouTubeDownloadError as exc:
+            record_failure(st.session_state, exc)
+            st.rerun()
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("Tab PDF could not read the audio file: %s", exc)
+            record_failure(st.session_state, exc, message="Could not read that audio file.")
+            st.rerun()
+        except ValueError as exc:
+            record_failure(st.session_state, exc)
+            st.rerun()
+        except Exception as exc:
+            logger.exception("Unexpected tab conversion error")
+            record_failure(
+                st.session_state,
+                exc,
+                message="Conversion failed unexpectedly. Check that the audio file is valid.",
+            )
+            st.rerun()
 
-            try:
-                audio_path = save_upload(uploaded) if uploaded else None
-                url = youtube_url.strip() or None
-                artifacts = run_pipeline(
-                    audio_path=audio_path,
-                    youtube_url=url,
-                    output_dir=output_dir,
-                    config=config,
-                    on_progress=on_progress,
-                )
-                rows = apply_progress(rows, "done", "Pipeline complete")
-                _paint_checklist(progress_slot, rows)
-                st.session_state["tab_pdf_artifacts"] = {key: str(value) for key, value in artifacts.items()}
-                st.session_state["tab_pdf_title"] = title or "Guitar Tab"
-                st.session_state["tab_pdf_skipped_separation"] = skipped_separation
-                st.session_state["tab_pdf_source_audio_path"] = str(audio_path) if audio_path else None
-                st.session_state["tab_pdf_flash"] = "Conversion complete."
-                st.session_state["tab_pdf_details"] = {
-                    "onset": onset_threshold,
-                    "frame": frame_threshold,
-                    "mix_aware": mix_aware,
-                    "separate": effective_separate,
-                }
-                st.session_state["tab_result_tuning"] = str(tuning_name)
-                st.session_state["tab_result_capo"] = int(capo)
-                st.session_state["tab_result_transpose"] = 0
-                st.session_state["tab_result_bars"] = 4
-                st.session_state["tab_pdf_export_sig"] = [str(tuning_name), int(capo), 0, 4]
-                st.session_state.pop("tab_pdf_error", None)
-                st.session_state.pop("tab_pdf_error_detail", None)
-                write_run_metadata(
-                    output_dir,
-                    page="tab_pdf",
-                    title=title or "Guitar Tab",
-                    artifacts=artifacts,
-                )
-                st.rerun()
-            except EmptyTranscriptionError as exc:
-                record_failure(st.session_state, exc)
-                st.rerun()
-            except YouTubeDownloadError as exc:
-                record_failure(st.session_state, exc)
-                st.rerun()
-            except (FileNotFoundError, OSError) as exc:
-                logger.warning("Tab PDF could not read the audio file: %s", exc)
-                record_failure(st.session_state, exc, message="Could not read that audio file.")
-                st.rerun()
-            except ValueError as exc:
-                record_failure(st.session_state, exc)
-                st.rerun()
-            except Exception as exc:
-                logger.exception("Unexpected tab conversion error")
-                record_failure(
-                    st.session_state,
-                    exc,
-                    message="Conversion failed unexpectedly. Check that the audio file is valid.",
-                )
-                st.rerun()
 
     if flash := st.session_state.pop("tab_pdf_flash", None):
         st.success(flash)

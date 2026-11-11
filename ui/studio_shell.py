@@ -16,7 +16,7 @@ def hero_html() -> str:
     return """
 <div class="studio-hero">
   <h1>Tab PDF</h1>
-  <p>Upload a short solo-guitar clip or paste a public YouTube link. Convert locally to tab, chords, MIDI, and PDF.</p>
+  <p>Upload a short solo-guitar clip or search a public YouTube video. Convert locally to tab, chords, MIDI, and PDF.</p>
 </div>
 """
 
