@@ -1,10 +1,13 @@
 # audiotabs
 
-Dedicated app for **Tab PDF**: audio (or YouTube URL) → optional guitar stem separation → MIDI → ASCII tab / PDF.
-
 <p align="center">
-  <img src="https://via.placeholder.com/160/a8a8a8/ffffff?text=Tab+PDF" alt="Tab PDF" width="160">
+  <strong>⚠️ EXTREME WORK IN PROGRESS ⚠️</strong><br>
+  <span style="color:#e8a317; font-size:1.1rem;">This app is under active development. Countless bugs exist. 99.9% of features do not work. Unless you are a developer yourself, I would not waste your time here.</span>
 </p>
+
+<h1 align="center">
+  <img src="https://via.placeholder.com/160/a8a8a8/ffffff?text=Tab+PDF" alt="Tab PDF" width="160">
+</h1>
 
 <p align="center">
   Convert audio to guitar tab PDF (standalone Tab PDF app).
@@ -51,7 +54,7 @@ On Windows:
 
 **Windows CPU**
 ```powershell
-$env:AUDIO_TOOLS_EDITION = "cpu"
+$env:AUDIO_TOOLS_EDITOR = "cpu"
 .\.venv311\Scripts\python.exe packaging/launcher.py
 ```
 
