@@ -40,7 +40,13 @@ def _measure_seconds(doc: TabDocument) -> float:
     return 60.0 / tempo * beats
 
 
-def tab_staff_svg(doc: TabDocument, *, bars_per_line: int = 4) -> str:
+def tab_staff_svg(
+    doc: TabDocument,
+    *,
+    bars_per_line: int = 4,
+    ink: str = "#111",
+    line: str = "#222",
+) -> str:
     """Notation staff: six lines, fret numbers, and one row per bars-per-line group."""
     count = measure_count(doc)
     rows = measure_rows(count, bars_per_line)
@@ -63,11 +69,11 @@ def tab_staff_svg(doc: TabDocument, *, bars_per_line: int = 4) -> str:
                 y = top + string_index * 12
                 parts.append(
                     f'<line x1="{x}" y1="{y}" x2="{x + measure_width - 16}" y2="{y}" '
-                    'stroke="#222" stroke-width="1"/>'
+                    f'stroke="{line}" stroke-width="1"/>'
                 )
                 if column == 0:
                     parts.append(
-                        f'<text x="8" y="{y + 3}" font-size="11" fill="#111">'
+                        f'<text x="8" y="{y + 3}" font-size="11" fill="{ink}">'
                         f"{escape(labels[string_index])}</text>"
                     )
             m_start = measure_index * measure_sec
@@ -81,10 +87,10 @@ def tab_staff_svg(doc: TabDocument, *, bars_per_line: int = 4) -> str:
                     y_note = top + (5 - note.string) * 12
                     parts.append(
                         f'<text x="{x_note:.1f}" y="{y_note - 2}" font-size="12" '
-                        f'font-weight="700" fill="#111">{int(note.fret)}</text>'
+                        f'font-weight="700" fill="{ink}">{int(note.fret)}</text>'
                     )
             parts.append(
-                f'<text x="{x}" y="{top + 78}" font-size="11" fill="#111">{measure_index + 1}</text>'
+                f'<text x="{x}" y="{top + 78}" font-size="11" fill="{ink}">{measure_index + 1}</text>'
             )
         parts.append("</g>")
     parts.append("</svg>")
@@ -137,6 +143,8 @@ def piano_roll_svg(
     tempo_bpm: float,
     beats_per_measure: int,
     semitones: int = 0,
+    ink: str = "#111",
+    line: str = "#bbb",
 ) -> str:
     """Time against sounding pitch, with measure numbers."""
     shifted = [(int(pitch) + int(semitones), float(start), float(end)) for pitch, start, end in notes]
@@ -164,9 +172,9 @@ def piano_roll_svg(
     ]
     for index in range(measures):
         x = 48 + index * measure_sec * scale
-        parts.append(f'<text x="{x:.1f}" y="16" font-size="12" fill="#111">{index + 1}</text>')
+        parts.append(f'<text x="{x:.1f}" y="16" font-size="12" fill="{ink}">{index + 1}</text>')
         parts.append(
-            f'<line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="{height - 8}" stroke="#bbb" stroke-width="1"/>'
+            f'<line x1="{x:.1f}" y1="22" x2="{x:.1f}" y2="{height - 8}" stroke="{line}" stroke-width="1"/>'
         )
     for pitch, start, end in shifted:
         name = midi_note_name(min(127, max(0, pitch)))
@@ -174,17 +182,22 @@ def piano_roll_svg(
         w = max(4.0, (end - start) * scale)
         y = y_for(pitch)
         parts.append(
-            f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="8" fill="#222" rx="1">'
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="8" fill="{ink}" rx="1">'
             f"<title>{escape(name)}</title></rect>"
         )
         parts.append(
-            f'<text x="{x + w + 4:.1f}" y="{y + 8:.1f}" font-size="11" fill="#111">{escape(name)}</text>'
+            f'<text x="{x + w + 4:.1f}" y="{y + 8:.1f}" font-size="11" fill="{ink}">{escape(name)}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
 
 
-def chord_diagram_svg(name: str, frets: list[int | None] | tuple[int | None, ...]) -> str:
+def chord_diagram_svg(
+    name: str,
+    frets: list[int | None] | tuple[int | None, ...],
+    *,
+    ink: str = "#111",
+) -> str:
     """Six-string diagram. Fret 0 is open. None is a muted string."""
     values = list(frets[:6]) + [None] * (6 - len(list(frets[:6])))
     played = [fret for fret in values if isinstance(fret, int) and fret > 0]
@@ -201,37 +214,37 @@ def chord_diagram_svg(name: str, frets: list[int | None] | tuple[int | None, ...
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'role="img" aria-label="Chord {escape(name)}">',
         f'<text x="{width / 2}" y="18" text-anchor="middle" font-size="14" '
-        f'font-weight="700" fill="#111">{escape(name)}</text>',
+        f'font-weight="700" fill="{ink}">{escape(name)}</text>',
     ]
     if start > 1:
-        parts.append(f'<text x="4" y="{top + 14}" font-size="11" fill="#111">{start}</text>')
+        parts.append(f'<text x="4" y="{top + 14}" font-size="11" fill="{ink}">{start}</text>')
     for string_index in range(6):
         x = left + string_index * string_gap
         parts.append(
-            f'<line x1="{x}" y1="{top}" x2="{x}" y2="{top + 4 * fret_gap}" stroke="#222" stroke-width="1"/>'
+            f'<line x1="{x}" y1="{top}" x2="{x}" y2="{top + 4 * fret_gap}" stroke="{ink}" stroke-width="1"/>'
         )
     for fret_index in range(5):
         y = top + fret_index * fret_gap
         weight = 3 if fret_index == 0 and start == 1 else 1
         parts.append(
             f'<line x1="{left}" y1="{y}" x2="{left + 5 * string_gap}" y2="{y}" '
-            f'stroke="#222" stroke-width="{weight}"/>'
+            f'stroke="{ink}" stroke-width="{weight}"/>'
         )
     for string_index, fret in enumerate(values):
         x = left + string_index * string_gap
         if fret is None:
-            parts.append(f'<text x="{x}" y="{top - 6}" text-anchor="middle" font-size="11" fill="#111">x</text>')
+            parts.append(f'<text x="{x}" y="{top - 6}" text-anchor="middle" font-size="11" fill="{ink}">x</text>')
             continue
         if fret == 0:
             parts.append(
-                f'<circle cx="{x}" cy="{top - 8}" r="4" fill="none" stroke="#222" stroke-width="1"/>'
+                f'<circle cx="{x}" cy="{top - 8}" r="4" fill="none" stroke="{ink}" stroke-width="1"/>'
             )
             continue
         row = fret - start + 1
         if row < 1 or row > 4:
             row = min(4, max(1, row))
         y = top + (row - 0.5) * fret_gap
-        parts.append(f'<circle cx="{x}" cy="{y:.1f}" r="5" fill="#222"/>')
+        parts.append(f'<circle cx="{x}" cy="{y:.1f}" r="5" fill="{ink}"/>')
     parts.append("</svg>")
     return "".join(parts)
 

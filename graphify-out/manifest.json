@@ -1,0 +1,350 @@
+{
+  "packaging/launcher.py": {
+    "mtime": 1794319761.0,
+    "seen": 1794385188.656687,
+    "ast_hash": "eba7c5876ad522c852bc4ade1af44826",
+    "semantic_hash": ""
+  },
+  "pyproject.toml": {
+    "mtime": 1794319700.0,
+    "seen": 1794385188.6566908,
+    "ast_hash": "41d851182c44f6c429083a2fc175c0c7",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/__init__.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656693,
+    "ast_hash": "8b23b019143fc81bd6415e307feeaf32",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/chords.py": {
+    "mtime": 1794291078.0,
+    "seen": 1794385188.656694,
+    "ast_hash": "f81bb37498543b9f52f253df640aa66b",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/cli/__init__.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6566951,
+    "ast_hash": "0a4dad444a64ae0a4c16fdd44ed17663",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/cli/mid2tab.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656696,
+    "ast_hash": "ff99bdfeb0e03b5c54301db24a0f9c5b",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/cli/pipeline.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656697,
+    "ast_hash": "0d82a5f77aa392da26d5649bf8b9e54c",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/cli/tab2pdf.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6566982,
+    "ast_hash": "f76dbd50a48263e3ca6c3fabca68b67b",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/cli/transcribe.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6566982,
+    "ast_hash": "488431e4e08d9aff47beb2bf3f14295f",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/demucs_bootstrap.py": {
+    "mtime": 1794267442.0,
+    "seen": 1794385188.656699,
+    "ast_hash": "66adb368d30da8f980745fc7255b7688",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/edition.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6567,
+    "ast_hash": "2dace58d010f7a1eb95f0763119ffb90",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/hardware.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6567008,
+    "ast_hash": "f8be1e57c52341373de81e0350c7c4af",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/ingest.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6567008,
+    "ast_hash": "e32a0866cfd9559453fd3588f098d14d",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/isolate.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656702,
+    "ast_hash": "7fbc2c9de43bb7b445513d7dfc386ff8",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/lead_rhythm.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656703,
+    "ast_hash": "9db2a7a22db030a0300f2d026cf61c43",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/lyrics.py": {
+    "mtime": 1794291172.0,
+    "seen": 1794385188.656704,
+    "ast_hash": "a3378f9bc64535c9659ef654450cd2fe",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/metronome.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656704,
+    "ast_hash": "5d88dce39686702c78de9b839145df7d",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/midi_cleanup.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6567051,
+    "ast_hash": "7b841c1a3f2e974c2a7dcc76981ca276",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/mixer.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656706,
+    "ast_hash": "7f0ba2741df64f27d0643c3c3a44089e",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/notation_view.py": {
+    "mtime": 1794384277.5388346,
+    "seen": 1794385188.656706,
+    "ast_hash": "3f8b30eca48de1e61ee0668293be0471",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/pdf_render.py": {
+    "mtime": 1794291246.0,
+    "seen": 1794385188.656707,
+    "ast_hash": "e3ccd1eaa474d30b8b6db13d0f62b109",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/pipeline.py": {
+    "mtime": 1794291293.0,
+    "seen": 1794385188.656708,
+    "ast_hash": "574bec1d1f323184d1fb8a3baf97bdd8",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/player_bar.py": {
+    "mtime": 1794384305.6980484,
+    "seen": 1794385188.656708,
+    "ast_hash": "0821f3133b791fce49d412baff810218",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/progress_checklist.py": {
+    "mtime": 1794291164.0,
+    "seen": 1794385188.6567092,
+    "ast_hash": "1c2c47391eb8d161a56b262b6a25c5f6",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/rhythm.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.65671,
+    "ast_hash": "2edc40cbdd8071d63dae1f0b0446e28d",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/roformer.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.65671,
+    "ast_hash": "4d47fb3c8f6b24cb9336750689b6ef45",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/scnet.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.6567109,
+    "ast_hash": "1d8ec35a3e670a5542e8c97ba34f8ba0",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/separate.py": {
+    "mtime": 1794291256.0,
+    "seen": 1794385188.656712,
+    "ast_hash": "f1c76c9b4f62bccd255eadd87c21579e",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/staff_wrap.py": {
+    "mtime": 1794291007.0,
+    "seen": 1794385188.656713,
+    "ast_hash": "83cc2a6aa403bb08337e13f068acaf0d",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/subprocess_util.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656713,
+    "ast_hash": "e17a10a755cc4c42387a2d47e935fccd",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/tab_bundle.py": {
+    "mtime": 1794291189.0,
+    "seen": 1794385188.656714,
+    "ast_hash": "be48e01541a7fd73082f73b85b2bb8ab",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/tab_generate.py": {
+    "mtime": 1794291017.0,
+    "seen": 1794385188.656715,
+    "ast_hash": "b10962933d12f851c9b50bb1b36bfc73",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/tempo.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656715,
+    "ast_hash": "05438b1fa85d32edc915fd429ac2a86e",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/transcribe.py": {
+    "mtime": 1794206756.0,
+    "seen": 1794385188.656716,
+    "ast_hash": "76189ee293820a30f65d6d3096a5fee8",
+    "semantic_hash": ""
+  },
+  "src/audio_to_tab/tuning.py": {
+    "mtime": 1794291012.0,
+    "seen": 1794385188.656717,
+    "ast_hash": "6fd07d7e3d4ee739a5cf256a28e00ed7",
+    "semantic_hash": ""
+  },
+  "tests/conftest.py": {
+    "mtime": 1794207230.0,
+    "seen": 1794385188.656718,
+    "ast_hash": "7e990bfb91916d75dad5e05825d9077e",
+    "semantic_hash": ""
+  },
+  "tests/test_hardware.py": {
+    "mtime": 1794207230.0,
+    "seen": 1794385188.656718,
+    "ast_hash": "cc65ae3ee0c9542d2ac44a655c94176d",
+    "semantic_hash": ""
+  },
+  "tests/test_ingest.py": {
+    "mtime": 1794207230.0,
+    "seen": 1794385188.6567192,
+    "ast_hash": "30eefb2e80a3f86821b339c5fe963015",
+    "semantic_hash": ""
+  },
+  "tests/test_pipeline_guitar.py": {
+    "mtime": 1794207230.0,
+    "seen": 1794385188.65672,
+    "ast_hash": "400fd798bc9d026d4378afe9703946ca",
+    "semantic_hash": ""
+  },
+  "tests/test_result_studio.py": {
+    "mtime": 1794377831.3419318,
+    "seen": 1794385188.65672,
+    "ast_hash": "826f4203ec0216cb2a074a3a83246dc3",
+    "semantic_hash": ""
+  },
+  "tests/test_scnet.py": {
+    "mtime": 1794207397.0,
+    "seen": 1794385188.6567209,
+    "ast_hash": "f414c0c8a303a1bb1a26e0225d079f83",
+    "semantic_hash": ""
+  },
+  "tests/test_studio_ui.py": {
+    "mtime": 1794384075.9463031,
+    "seen": 1794385188.6567218,
+    "ast_hash": "5afa228a4e54ef49900284e5b77c8516",
+    "semantic_hash": ""
+  },
+  "tests/test_tab.py": {
+    "mtime": 1794207395.0,
+    "seen": 1794385188.656723,
+    "ast_hash": "004705d24520cc5f7fc9a85d7393911d",
+    "semantic_hash": ""
+  },
+  "tests/test_tempo.py": {
+    "mtime": 1794207230.0,
+    "seen": 1794385188.656723,
+    "ast_hash": "27f9330f6d638a2c31b3849e0ca28a72",
+    "semantic_hash": ""
+  },
+  "tests/test_youtube_search.py": {
+    "mtime": 1794374798.3247762,
+    "seen": 1794385188.656724,
+    "ast_hash": "1a02fff1fa9ce5c92490daf941aecc90",
+    "semantic_hash": ""
+  },
+  "ui/__init__.py": {
+    "mtime": 1794207135.0,
+    "seen": 1794385188.656725,
+    "ast_hash": "4ddbe74372fa6a586cb978997b026136",
+    "semantic_hash": ""
+  },
+  "ui/app.py": {
+    "mtime": 1794319128.0,
+    "seen": 1794385188.6567261,
+    "ast_hash": "f98656d359d8e83262bd98dc857799d4",
+    "semantic_hash": ""
+  },
+  "ui/common.py": {
+    "mtime": 1794207136.0,
+    "seen": 1794385188.6567261,
+    "ast_hash": "8e89b522187f0fd87aae7ca14958084d",
+    "semantic_hash": ""
+  },
+  "ui/guitar_engines.py": {
+    "mtime": 1794207137.0,
+    "seen": 1794385188.656727,
+    "ast_hash": "419d51b0652a55fc478d288f9059d05d",
+    "semantic_hash": ""
+  },
+  "ui/pages/__init__.py": {
+    "mtime": 1794207219.0,
+    "seen": 1794385188.656728,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": ""
+  },
+  "ui/pages/tab_pdf.py": {
+    "mtime": 1794384972.5035036,
+    "seen": 1794385188.656728,
+    "ast_hash": "a45a14dc4cf95daeda8577f907af1ce0",
+    "semantic_hash": ""
+  },
+  "ui/studio_shell.py": {
+    "mtime": 1794384708.9213598,
+    "seen": 1794385188.656729,
+    "ast_hash": "30076e6fcaf64a4b4d6f200e4e175aec",
+    "semantic_hash": ""
+  },
+  "ui/studio_theme.py": {
+    "mtime": 1794384344.4509497,
+    "seen": 1794385188.6567302,
+    "ast_hash": "1f1525c7d73d9650946aaa0b71f70109",
+    "semantic_hash": ""
+  },
+  "ui/youtube_search.py": {
+    "mtime": 1794374793.8381784,
+    "seen": 1794385188.6567302,
+    "ast_hash": "7fe3c0457c4b4eef4e249ea4a527a9ea",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1794354038.2289288,
+    "seen": 1794385188.656731,
+    "ast_hash": "5c4431eb172fb405d71f6e4d6a04dc2b",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-11-10-studio-ui.md": {
+    "mtime": 1794318967.0,
+    "seen": 1794385188.6567318,
+    "ast_hash": "609c89be0cad0e5142691acef13ba7de",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-11-10-tab-result.md": {
+    "mtime": 1794290123.0,
+    "seen": 1794385188.6567318,
+    "ast_hash": "8e844f4f9588133aaf629a3eee8babc8",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-11-10-studio-ui-design.md": {
+    "mtime": 1794384666.1079366,
+    "seen": 1794385188.656733,
+    "ast_hash": "308f95edee697ec6ff1b72bfea65630d",
+    "semantic_hash": ""
+  }
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from html import escape
 from pathlib import Path
 
 from audio_to_tab.metronome import metronome_grid_times
@@ -63,8 +64,9 @@ def player_html(
     click_times: list[float],
     audio_b64: str,
     mime: str = "audio/wav",
+    title: str = "",
 ) -> str:
-    """Self-contained player. Speeds, loop, and metronome stay inside the frame."""
+    """Self-contained player. Waveform stays in the column; transport pins to the window."""
     payload = json.dumps(
         {
             "peaks": [round(value, 4) for value in peaks],
@@ -73,22 +75,27 @@ def player_html(
             "src": f"data:{mime};base64,{audio_b64}" if audio_b64 else "",
             "speeds": [
                 {"rate": speed, "label": label}
-                for speed, label in ((0.25, "0.25"), (0.5, "0.50"), (0.75, "0.75"), (1.0, "1"))
+                for speed, label in ((0.25, "0.25"), (0.5, "0.50"), (0.75, "0.75"), (1.0, "1X"))
             ],
         }
     )
+    song = f'<span class="song">{escape(title)}</span>' if title else ""
     return f"""
 <div id="tab-player" class="studio">
-  <canvas id="tab-wave" width="640" height="64" aria-label="Waveform"></canvas>
-  <div class="row">
+  <div class="wave">
+    <canvas id="tab-wave" width="960" height="72" aria-label="Waveform"></canvas>
+    <p class="tip">Drag across the waveform to loop a section.</p>
+  </div>
+  <div class="transport">
     <button type="button" id="tab-play">Play</button>
     <span id="tab-time">0:00 / 0:00</span>
+    {song}
     <span id="tab-speeds"></span>
-    <label>Volume <input id="tab-volume" type="range" min="0" max="1" step="0.05" value="1"></label>
-    <label><input id="tab-loop" type="checkbox"> Loop</label>
-    <label>Start <input id="tab-loop-start" type="range" min="0" max="1" step="0.01" value="0"></label>
-    <label>End <input id="tab-loop-end" type="range" min="0" max="1" step="0.01" value="1"></label>
-    <label><input id="tab-metro" type="checkbox"> Metronome</label>
+    <label class="quiet">Volume <input id="tab-volume" type="range" min="0" max="1" step="0.05" value="1"></label>
+    <label class="toggle"><input id="tab-loop" type="checkbox"> Loop</label>
+    <label class="sr">Start <input id="tab-loop-start" type="range" min="0" max="1" step="0.01" value="0"></label>
+    <label class="sr">End <input id="tab-loop-end" type="range" min="0" max="1" step="0.01" value="1"></label>
+    <label class="toggle"><input id="tab-metro" type="checkbox"> Metronome</label>
   </div>
   <audio id="tab-audio" preload="auto"></audio>
 </div>
@@ -96,45 +103,100 @@ def player_html(
   #tab-player.studio {{
     font: 14px/1.4 ui-sans-serif, system-ui, sans-serif;
     color: #e8eaef;
-    background: #171a21;
-    border: 1px solid #2a2f3a;
-    border-radius: 10px;
-    padding: 12px;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0 0 0.85rem 0;
   }}
-  #tab-player.studio .row {{
+  #tab-player .tip {{
+    margin: 0.35rem 0 0;
+    color: #9aa3b2;
+    font-size: 0.78rem;
+  }}
+  #tab-player .transport {{
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 12px;
     align-items: center;
-    margin-top: 10px;
+    gap: 0.55rem 0.8rem;
+    margin: 0;
+    padding: 0.5rem 1rem;
+    background: #0f1115;
+    border-top: 1px solid #2a2f3a;
+  }}
+  #tab-player .song {{
+    color: #e8eaef;
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 16rem;
   }}
   #tab-player.studio button {{
     font: inherit;
-    color: #e8eaef;
-    background: #0f1115;
-    border: 1px solid #2a2f3a;
+    color: #9aa3b2;
+    background: transparent;
+    border: 0;
     border-radius: 8px;
-    padding: 6px 12px;
+    padding: 0.2rem 0.35rem;
   }}
-  #tab-player.studio button[aria-pressed="true"],
   #tab-player.studio #tab-play {{
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 999px;
+    padding: 0;
     background: #e8a317;
     color: #111;
-    border-color: #e8a317;
-    font-weight: 600;
+    border: 1px solid #e8a317;
+    font-weight: 700;
+    font-size: 0.72rem;
   }}
   #tab-player.studio button[aria-pressed="true"] {{
     background: #e8a317;
     color: #111;
+    border-radius: 6px;
+    font-weight: 700;
   }}
-  #tab-player.studio label {{ color: #9aa3b2; }}
-  #tab-wave {{
-    width: 100%;
-    height: 64px;
+  #tab-player #tab-time {{
+    font-variant-numeric: tabular-nums;
+    color: #e8eaef;
+    min-width: 6.5rem;
+  }}
+  #tab-player label.quiet {{ color: #9aa3b2; font-size: 0.78rem; }}
+  #tab-player label.toggle {{
+    position: relative;
     border: 1px solid #2a2f3a;
     border-radius: 8px;
-    background: #0f1115;
+    padding: 0.28rem 0.6rem;
+    color: #9aa3b2;
+    background: #171a21;
+  }}
+  #tab-player label.toggle:has(input:checked) {{
+    background: #e8a317;
+    color: #111;
+    border-color: #e8a317;
+  }}
+  #tab-player label.toggle input,
+  #tab-player label.sr {{
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }}
+  #tab-wave {{
+    width: 100%;
+    height: 72px;
+    border: 1px solid #2a2f3a;
+    border-radius: 10px;
+    background: #171a21;
     cursor: pointer;
+    display: block;
   }}
 </style>
 <script>

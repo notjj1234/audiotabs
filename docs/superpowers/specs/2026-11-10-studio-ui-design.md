@@ -54,3 +54,11 @@ Make Tab PDF look like a clean, minimal music studio — dense where it matters,
 **Result:** title + meta strip; horizontal view switch (Chords / Tab / Text / Piano roll); main notation; optional right chord rail; Download popover; player under the score using the same dark tokens.
 
 **Left to builder:** exact CSS selectors against Streamlit DOM, how much of the form stays native widgets vs HTML labels, and whether the player gets a sticky `position` inside the Streamlit main block.
+
+## Layout decisions (2026-11-11)
+
+- The empty screen stays a title on the charcoal ground, then one centered column: local drop zone, then YouTube search. The public-YouTube disclaimer stays in the search dialog.
+- Title, tuning, capo, and stem separation appear in that column after a file or video is chosen. Pipeline knobs stay in one collapsed Advanced section.
+- The entry form is not shown while a conversion is running, or on the finished song screen. New song returns to the empty screen.
+- The waveform sits in the song column. Play, time, speeds (including 0.25), loop, and metronome are fixed to the bottom of the window.
+- Notation, lyrics, and chord diagrams use light ink on the charcoal panel. Tab, Chords, Text, and Piano roll stay in that order.

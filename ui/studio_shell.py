@@ -16,27 +16,51 @@ def hero_html() -> str:
     return """
 <div class="studio-hero">
   <h1>Tab PDF</h1>
-  <p>Upload a short solo-guitar clip or search a public YouTube video. Convert locally to tab, chords, MIDI, and PDF.</p>
 </div>
 """
 
 
 def progress_card_html(rows: list[dict[str, str]]) -> str:
     items: list[str] = []
+    active_label = ""
+    finished = 0
     for row in rows:
         state = str(row.get("state") or "pending")
         word = _STATE_WORDS.get(state, "Waiting")
         label = escape(str(row.get("label") or ""))
         detail = str(row.get("detail") or "").strip()
         detail_html = f" — {escape(detail)}" if detail else ""
+        if state == "active" and not active_label:
+            active_label = str(row.get("label") or "Transcribing")
+        if state in {"done", "skipped"}:
+            finished += 1
         items.append(
-            f'<li><span class="state {escape(state)}">{escape(word)}</span>'
-            f"<span>{label}{detail_html}</span></li>"
+            f'<li class="{escape(state)}">'
+            f'<span class="mark" aria-hidden="true"></span>'
+            f'<span class="label">{label}{detail_html}</span>'
+            f'<span class="state {escape(state)}">{escape(word)}</span>'
+            f"</li>"
         )
+    total = max(len(rows), 1)
+    working = any(str(row.get("state") or "") == "active" for row in rows)
+    ratio = (finished + (0.45 if working else 0.0)) / total
+    percent = max(0, min(100, round(ratio * 100)))
+    if active_label:
+        heading = active_label
+    elif rows and finished == len(rows):
+        heading = "Ready"
+    else:
+        heading = "Transcribing"
     body = "\n".join(items)
     return f"""
 <div class="studio-progress" role="status" aria-live="polite">
-  <h3>Transcribing</h3>
+  <div class="head">
+    <span class="pct">{percent}%</span>
+    <h3>{escape(heading)}</h3>
+  </div>
+  <div class="studio-progress-bar" role="progressbar" aria-valuenow="{percent}" aria-valuemin="0" aria-valuemax="100">
+    <span style="width:{percent}%"></span>
+  </div>
   <ul>
 {body}
   </ul>

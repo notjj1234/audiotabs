@@ -30,15 +30,27 @@ def studio_css() -> str:
   background: var(--studio-bg);
   color: var(--studio-text);
 }}
-[data-testid="stHeader"] {{
-  background: transparent;
+[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+#MainMenu,
+footer {{
+  display: none !important;
 }}
-[data-testid="stToolbar"] {{
-  right: 0.75rem;
+.stApp {{
+  scrollbar-color: var(--studio-line) var(--studio-bg);
+}}
+.stApp ::selection {{
+  background: var(--studio-accent);
+  color: #111;
+}}
+.stApp :focus-visible {{
+  outline: 2px solid var(--studio-accent);
+  outline-offset: 2px;
 }}
 .block-container {{
-  padding-top: 1.25rem;
-  padding-bottom: 4rem;
+  padding-top: 0.85rem;
+  padding-bottom: 5.5rem;
   max-width: 1180px;
 }}
 h1, h2, h3, .stMarkdown, .stCaption, label, p {{
@@ -76,7 +88,7 @@ div[data-baseweb="input"] > div,
 .st-key-tab_source_entry {{
   width: min(36rem, 100%);
   max-width: 36rem;
-  margin: 2.5rem auto 1.25rem auto;
+  margin: 0.35rem auto 1.25rem auto;
 }}
 .st-key-tab_source_entry [data-testid="stWidgetLabel"] {{
   position: absolute !important;
@@ -271,60 +283,125 @@ div[data-baseweb="input"] > div,
   border: 1px solid var(--studio-line);
   border-radius: 10px;
 }}
-.studio-hero, .studio-progress, .studio-result-header {{
+.studio-hero {{
+  background: transparent;
+  border: 0;
+  text-align: center;
+  padding: 0;
+  margin: 12vh auto 0.85rem;
+  max-width: 36rem;
+}}
+.studio-hero h1 {{
+  margin: 0;
+  font-size: 1.85rem;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+}}
+.studio-run-title {{
+  width: min(40rem, 100%);
+  margin: 3.25rem auto 0.85rem;
+}}
+.studio-run-title h1 {{
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}}
+.studio-progress {{
+  width: min(40rem, 100%);
+  margin: 0 auto 1rem;
   background: var(--studio-panel);
   border: 1px solid var(--studio-line);
   border-radius: 10px;
-  padding: 1.1rem 1.25rem;
-  margin: 0 0 1rem 0;
+  padding: 1rem 1.1rem 0.85rem;
 }}
-.studio-hero h1 {{
-  margin: 0 0 0.35rem 0;
-  font-size: 1.65rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+.studio-progress .head {{
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
 }}
-.studio-hero p {{
-  margin: 0;
-  color: var(--studio-muted) !important;
-  max-width: 42rem;
+.studio-progress .pct {{
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 999px;
+  border: 2px solid var(--studio-accent);
+  color: var(--studio-accent);
+  font-size: 0.68rem;
+  font-weight: 700;
 }}
 .studio-progress h3 {{
-  margin: 0 0 0.75rem 0;
-  font-size: 0.95rem;
-  font-weight: 600;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}}
+.studio-progress-bar {{
+  height: 3px;
+  background: var(--studio-line);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 0 0 0.85rem;
+}}
+.studio-progress-bar span {{
+  display: block;
+  height: 100%;
+  background: var(--studio-accent);
 }}
 .studio-progress ul {{
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.55rem;
 }}
 .studio-progress li {{
-  display: flex;
-  gap: 0.65rem;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: 0.85rem minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
   font-size: 0.92rem;
 }}
+.studio-progress .mark {{
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--studio-muted);
+}}
+.studio-progress li.done .mark {{
+  background: var(--studio-accent);
+  border-color: var(--studio-accent);
+}}
+.studio-progress li.active .mark {{
+  border-color: var(--studio-accent);
+  box-shadow: inset 0 0 0 2px var(--studio-panel), inset 0 0 0 4px var(--studio-accent);
+}}
 .studio-progress .state {{
-  min-width: 4.5rem;
   font-weight: 600;
   color: var(--studio-muted);
+  font-size: 0.82rem;
 }}
 .studio-progress .state.done {{ color: var(--studio-accent); }}
 .studio-progress .state.active {{ color: var(--studio-text); }}
-.studio-progress .state.skipped {{ color: var(--studio-muted); opacity: 0.85; }}
+.studio-progress .state.skipped,
+.studio-progress .state.pending {{ color: var(--studio-muted); }}
+.studio-result-header {{
+  background: transparent;
+  border: 0;
+  padding: 0.15rem 0 0.35rem;
+  margin: 0 0 0.35rem;
+}}
 .studio-result-header h2 {{
-  margin: 0 0 0.55rem 0;
-  font-size: 1.35rem;
+  margin: 0 0 0.35rem 0;
+  font-size: 1.85rem;
   font-weight: 650;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }}
 .studio-result-meta {{
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem 1.25rem;
+  gap: 0.35rem 0.85rem;
   color: var(--studio-muted) !important;
   font-size: 0.88rem;
 }}
@@ -332,42 +409,106 @@ div[data-baseweb="input"] > div,
   color: var(--studio-text);
   font-weight: 600;
 }}
-.studio-note {{
-  color: var(--studio-muted) !important;
-  font-size: 0.88rem;
-  margin: 0 0 1rem 0;
+.st-key-tab_pdf_view div[role="radiogroup"] {{
+  gap: 0.4rem;
+}}
+.st-key-tab_pdf_view div[role="radiogroup"] > label {{
+  background: var(--studio-panel);
+  border: 1px solid var(--studio-line);
+  border-radius: 8px;
+  padding: 0.22rem 0.7rem;
+  min-height: 2rem;
+}}
+.st-key-tab_pdf_view div[role="radiogroup"] > label:has(input:checked) {{
+  background: var(--studio-accent);
+  border-color: var(--studio-accent);
+}}
+.st-key-tab_pdf_view div[role="radiogroup"] > label:has(input:checked) p,
+.st-key-tab_pdf_view div[role="radiogroup"] > label:has(input:checked) span,
+.st-key-tab_pdf_view div[role="radiogroup"] > label:has(input:checked) div {{
+  color: #111 !important;
+}}
+.studio-stage {{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 0.75rem;
+  align-items: start;
+  margin: 0.35rem 0 1rem;
 }}
 .studio-score {{
-  background: #f4f5f7;
-  color: #111;
+  background: var(--studio-panel);
+  color: var(--studio-text);
   border: 1px solid var(--studio-line);
   border-radius: 10px;
-  padding: 1rem 1.1rem;
+  padding: 1.15rem 1.25rem 1.4rem;
   overflow-x: auto;
-  margin: 0 0 1rem 0;
+  min-height: 16rem;
+}}
+.studio-score .score-title {{
+  margin: 0 0 1rem;
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: 650;
+}}
+.studio-score .chord-names {{
+  margin: 0.9rem 0 0.1rem;
+  color: var(--studio-accent);
+  font-weight: 650;
+}}
+.studio-score .lyric-line {{
+  margin: 0 0 0.2rem;
+  color: var(--studio-text);
 }}
 .studio-score pre, .studio-score code {{
-  color: #111 !important;
+  color: var(--studio-text) !important;
   background: transparent !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }}
 .studio-rail {{
   background: var(--studio-panel);
   border: 1px solid var(--studio-line);
   border-radius: 10px;
-  padding: 0.85rem 0.9rem;
+  padding: 0.85rem 0.7rem 1rem;
+  max-height: 70vh;
+  overflow: auto;
 }}
 .studio-rail h4 {{
-  margin: 0 0 0.65rem 0;
-  font-size: 0.8rem;
-  letter-spacing: 0.06em;
+  margin: 0 0.4rem 0.55rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--studio-muted) !important;
 }}
+.studio-rail .diagrams {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}}
 .studio-rail .diagram {{
-  background: #f4f5f7;
-  border-radius: 8px;
-  padding: 0.45rem;
-  margin: 0 0 0.55rem 0;
+  background: transparent;
+  padding: 0.15rem;
+  margin: 0;
+}}
+.st-key-tab_recent {{
+  width: min(36rem, 100%);
+  margin: 0.5rem auto 0;
+}}
+@media (max-width: 960px) {{
+  .block-container {{
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }}
+  .studio-stage {{
+    grid-template-columns: 1fr;
+  }}
+  .studio-result-header h2,
+  .studio-hero h1 {{
+    font-size: 1.45rem;
+  }}
+  .studio-rail {{
+    max-height: none;
+  }}
 }}
 </style>
 """

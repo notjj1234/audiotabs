@@ -43,12 +43,20 @@ def test_progress_card_html_renders_states():
     assert "Skipped" in html and "no vocal stem" in html
 
 
-def test_hero_html_mentions_upload():
+def test_hero_html_is_title_only():
     from ui.studio_shell import hero_html
 
     html = hero_html()
     assert "studio-hero" in html
-    assert "audio" in html.lower() or "upload" in html.lower()
+    assert "<h1>Tab PDF</h1>" in html
+    assert "<p>" not in html
+
+
+def test_home_page_drops_experimental_note_and_info_banner():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "studio-note" not in source
+    assert "Stem separation is unavailable" not in source
 
 
 def test_result_header_html_shows_meta():
@@ -101,6 +109,84 @@ def test_entry_screen_offers_two_sources():
     assert "st.warning(" in dialog
     assert "if continue_ok and st.button(" in source
     assert "disabled=not continue_ok" not in source
+
+
+def test_progress_row_puts_the_state_after_the_label():
+    from ui.studio_shell import progress_card_html
+
+    html = progress_card_html([{"state": "done", "label": "Separating stems", "detail": ""}])
+    assert html.find("Separating stems") < html.find(">Done<")
+    assert "studio-progress-bar" in html
+
+
+def test_hero_sits_on_the_ground():
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    hero = css[css.find(".studio-hero {") :]
+    block = hero[: hero.find("}")]
+    assert "transparent" in block
+
+
+def test_studio_css_hides_streamlit_chrome():
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    assert 'data-testid="stHeader"' in css
+    assert "display: none" in css
+
+
+def test_score_panel_is_dark():
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    score = css[css.find(".studio-score") :]
+    assert "#f4f5f7" not in score[:500]
+    assert "studio-stage" in css
+
+
+def test_player_waveform_and_fixed_transport():
+    from audio_to_tab.player_bar import player_html
+
+    html = player_html(peaks=[0.2, 0.8], duration=8.0, click_times=[0.0], audio_b64="")
+    assert 'id="tab-wave"' in html
+    assert 'class="transport"' in html
+    assert "position: fixed" in html
+    assert html.find('id="tab-wave"') < html.find('class="transport"')
+    assert 'id="tab-loop"' in html and 'id="tab-metro"' in html
+
+
+def test_result_workspace_follows_the_song_page():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    body = source[source.find("def _render_success") : source.find("def main")]
+    assert '["Tab", "Chords", "Text", "Piano roll"]' in body
+    assert 'key="tab_new_song"' in body
+    assert body.find("result_header_html") < body.find("_render_player")
+    assert body.find("_render_player") < body.find('key="tab_pdf_view"')
+    assert body.find('key="tab_pdf_view"') < body.find("studio-stage")
+    assert "ink=" in body
+
+
+def test_entry_form_stays_off_the_run_and_the_song():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    main = source[source.find("\ndef main") :]
+    assert main.find("tab_pdf_pending") < main.find("_render_entry(")
+    assert main.find("tab_pdf_artifacts") < main.find("_render_entry(")
+
+
+def test_setup_controls_sit_ahead_of_advanced():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    entry = source[source.find("def _render_entry") : source.find("def _execute_pending")]
+    advanced = entry.find('st.expander(\n        "Advanced"')
+    if advanced < 0:
+        advanced = entry.find('st.expander("Advanced"')
+    assert advanced > 0
+    assert entry.find('key="tab_setup_tuning"') < advanced
+    assert entry.find('key="tab_separate_stems"') < advanced
+    assert advanced < entry.find('key="tab_max_duration_sec"')
 
 
 def test_entry_screen_css_has_one_hierarchy():

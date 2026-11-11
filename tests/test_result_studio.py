@@ -320,7 +320,6 @@ def test_page_keeps_current_guards_and_clears_failed_downloads():
     source = page.read_text(encoding="utf-8")
     app = (page.parents[1] / "app.py").read_text(encoding="utf-8")
     assert 'layout="wide"' in app
-    assert "Experimental." in source
     assert "public YouTube links only" in source
     assert 'key="tab_separate_stems"' in source
     assert "Safer length (recommended)" in source
