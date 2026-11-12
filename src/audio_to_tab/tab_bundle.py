@@ -37,7 +37,14 @@ def format_size_kb(num_bytes: int) -> str:
 def show_convert_action(*, has_file: bool, youtube_url: str) -> bool:
     if has_file:
         return True
-    return is_youtube_url(youtube_url or "")
+    text = (youtube_url or "").strip()
+    if not text:
+        return False
+    if is_youtube_url(text):
+        return True
+    from audio_to_tab.ingest import is_direct_media_url
+
+    return is_direct_media_url(text)
 
 
 def download_menu(artifacts: dict | None) -> list[dict]:

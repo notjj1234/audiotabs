@@ -1,17 +1,17 @@
-# Graph Report - audiotabs  (2026-11-11)
+# Graph Report - audiotabs  (2026-11-12)
 
 ## Corpus Check
-- 58 files · ~60,854 words
+- 62 files · ~66,289 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 5 file(s) not represented in the graph (top: (none) 3, .toml 1, .ico 1)
 
 ## Summary
-- 1292 nodes · 3134 edges · 76 communities (60 shown, 16 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 188 edges (avg confidence: 0.91)
+- 1425 nodes · 3379 edges · 84 communities (63 shown, 21 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 299 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `3eebfd86`
+- Built from commit: `921eadcc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,12 +25,12 @@
 - test_pipeline_guitar.py
 - roformer.py
 - test_ingest.py
-- ingest.py
+- download_youtube_audio
 - tab_pdf.py
 - isolate.py
 - pathlib
 - search_youtube_videos
-- run_pipeline
+- audio_to_tab/pipeline.py
 - test_hardware.py
 - separate.py
 - tab_generate.py
@@ -47,10 +47,10 @@
 - test_youtube_search.py
 - launcher.py
 - test_tab.py
-- scnet.py
+- rebake_metronome_artifact
 - separate_guitar_stem
 - tempo.py
-- edition.py
+- Cons / Flaws (Especially Problematic)
 - Path
 - player_bar.py
 - desktop_recommend
@@ -58,136 +58,143 @@
 - _execute_pending
 - lite_auto_choice
 - normalize_audio
-- get_desktop_probe_without_torch
+- get_desktop_probe
 - lyrics.py
 - Studio UI redesign
-- is_youtube_url
-- pathlib
+- ingest.py
+- YouTubeDownloadError
 - audiotabs
 - typing
 - recommended_cpu_threads
 - format_region_label
-- ensure_cuda_available
+- metronome.py
 - test_download_403_twice_raises_user_error
 - _YoutubeFileLogger
 - detect_present_stems
 - _scnet_architecture_module
-- staff_wrap.py
+- run_roformer_model
 - blend_guitar_stems
 - test_download_does_not_require_js_runtime
-- pytest
+- generate_metronome_stem
 - analyze_bass_bleed
 - apply_bleed_gate
 - test_download_retries_after_403_then_succeeds
-- _cpu_edition_by_default
-- format_region_label_filename
+- PipelineConfig
+- lite_detected_caption
 - audio-to-tab-pdf
-- analyze_dual_guitar_candidate
-- test_download_youtube_preview_video_uses_capped_mp4
-- test_search_youtube_videos_offset_slices_page
-- LowEndRecoveryDiagnostics
-- show_convert_action
+- Path
+- _is_403_error
+- argparse
+- metronome_grid_times
+- test_download_guitar_ft_retries_then_succeeds
+- _require_ffmpeg
+- os
+- test_failure_ux_contracts.py
+- test_download_guitar_ft_resumes_partial_part_file
+- test_download_403_retry_does_not_delete_unrelated_wav
+- test_download_retries_three_clients_on_403
+- LowEndRestoreDiagnostics
 
 ## God Nodes (most connected - your core abstractions)
 1. `separate_stems()` - 43 edges
-2. `HostProbe` - 34 edges
-3. `separate_guitar_stem()` - 34 edges
-4. `run_pipeline()` - 30 edges
-5. `TabDocument` - 24 edges
-6. `generate_metronome_stem()` - 24 edges
-7. `midi_to_tab()` - 23 edges
-8. `split_lead_rhythm_guitar()` - 23 edges
-9. `_render_entry()` - 22 edges
-10. `_render_success()` - 21 edges
+2. `_render_entry()` - 37 edges
+3. `HostProbe` - 35 edges
+4. `separate_guitar_stem()` - 34 edges
+5. `run_pipeline()` - 30 edges
+6. `Cons / Flaws (Especially Problematic)` - 26 edges
+7. `TabDocument` - 24 edges
+8. `generate_metronome_stem()` - 24 edges
+9. `midi_to_tab()` - 23 edges
+10. `split_lead_rhythm_guitar()` - 23 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `Review Focus` --references--> `test_studio_theme_defines_tokens()`  [INFERRED]
-  docs/superpowers/plans/2026-11-10-studio-ui.md → tests/test_studio_ui.py
-- `Task 4: Wire `tab_pdf.py` to the studio shell` --references--> `progress_card_html()`  [INFERRED]
-  docs/superpowers/plans/2026-11-10-studio-ui.md → ui/studio_shell.py
-- `File map` --references--> `inject_studio_theme()`  [INFERRED]
-  docs/superpowers/plans/2026-11-10-studio-ui.md → ui/studio_theme.py
-- `Task 4: Wire `tab_pdf.py` to the studio shell` --references--> `inject_studio_theme()`  [INFERRED]
-  docs/superpowers/plans/2026-11-10-studio-ui.md → ui/studio_theme.py
-- `Review Focus` --references--> `EmptyTranscriptionError`  [INFERRED]
-  docs/superpowers/plans/2026-11-10-tab-result.md → src/audio_to_tab/pipeline.py
+- `1. Well-Structured End-to-End Pipeline` --references--> `PipelineConfig`  [INFERRED]
+  ANALYSIS.md → src/audio_to_tab/pipeline.py
+- `9. Guitar-FT Weights Download Can Fail` --references--> `download_guitar_ft_weights()`  [INFERRED]
+  ANALYSIS.md → src/audio_to_tab/separate.py
+- `8. Chord Recognition` --references--> `bundle_chords()`  [INFERRED]
+  ANALYSIS.md → src/audio_to_tab/tab_bundle.py
+- `18. Tempo Detection Can Be Wrong` --references--> `resolve_tempo()`  [INFERRED]
+  ANALYSIS.md → src/audio_to_tab/tempo.py
+- `14. YouTube URL Validation Is Minimal` --references--> `is_youtube_url()`  [INFERRED]
+  ANALYSIS.md → src/audio_to_tab/ingest.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (76 total, 16 thin omitted)
+## Communities (84 total, 21 thin omitted)
 
 ### Community 0 - "numpy"
-Cohesion: 0.05
-Nodes (61): align_click_grid_to_downbeat(), analysis_wav_for_downbeat(), apply_click_rate(), attach_metronome_artifact(), _beat_band_energy(), _beat_impulse_ratios(), _beat_local_rms(), _best_phase() (+53 more)
+Cohesion: 0.11
+Nodes (20): align_click_grid_to_downbeat(), apply_click_rate(), _beat_band_energy(), _beat_impulse_ratios(), _beat_local_rms(), _best_phase(), click_grid_for_playback(), _downbeat_phase() (+12 more)
 
 ### Community 1 - "lead_rhythm.py"
 Cohesion: 0.08
 Nodes (27): _average_role_features(), build_midside_pair(), build_register_pair(), build_spatial_pair(), build_spectral_pair(), _CandidatePair, classify_lead_rhythm_roles(), _dominant_pitch_estimate() (+19 more)
 
 ### Community 2 - "mixer.py"
-Cohesion: 0.09
-Nodes (18): apply_pan(), apply_playback_transform(), apply_true_peak_ceiling(), audible_stems(), clamp_pan(), clamp_playback_semitones(), db_to_linear(), default_muted_for() (+10 more)
+Cohesion: 0.08
+Nodes (20): apply_pan(), apply_playback_transform(), apply_true_peak_ceiling(), audible_stems(), clamp_pan(), clamp_playback_semitones(), db_to_linear(), default_muted_for() (+12 more)
 
 ### Community 3 - "test_scnet.py"
-Cohesion: 0.10
-Nodes (6): test_download_scnet_weights_pins_url_and_sha256(), test_pipeline_progress_label_scnet(), test_run_scnet_model_writes_four_stems_and_no_other(), test_scnet_availability_follows_torch(), test_separate_guitar_stem_scnet_requires_runtime(), _tone_wav()
+Cohesion: 0.07
+Nodes (16): _demix_scnet(), download_scnet_weights(), _load_audio_stereo(), _msst_normalize(), run_scnet_model(), scnet_weights_path(), _torch_device(), _write_stem() (+8 more)
 
 ### Community 4 - "tab_bundle.py"
-Cohesion: 0.13
-Nodes (21): _capo_tuning(), ChordHit, chords_from_midi(), _collapse(), _correlate(), detect_key(), _frets_for(), name_chord() (+13 more)
+Cohesion: 0.10
+Nodes (23): 19. Key Detection Depends on MIDI Post-Processing, _capo_tuning(), ChordHit, chords_from_midi(), _collapse(), _correlate(), detect_key(), _frets_for() (+15 more)
 
 ### Community 5 - "notation_view.py"
-Cohesion: 0.18
+Cohesion: 0.19
 Nodes (13): _slice_document(), quantize_tab_document(), quantize_time(), sec_per_sixteenth(), _finite(), tab_document_from_dict(), tab_document_to_dict(), tab_measure_spans() (+5 more)
 
 ### Community 6 - "test_pipeline_guitar.py"
-Cohesion: 0.09
-Nodes (26): test_apply_guitar_low_end_recovery_debleed_writes_diagnostics(), test_apply_guitar_low_end_recovery_default_off(), test_apply_low_end_restore_boost_raises_low_band_share(), test_apply_low_end_restore_zero_db_is_noop(), test_apply_sub_bass_debleed_reduces_low_band_share(), test_collect_named_stems_filters_to_requested_names(), test_guitar_ft_weights_cached_false_when_missing(), test_guitar_ft_weights_cached_true_when_hash_matches() (+18 more)
+Cohesion: 0.11
+Nodes (23): test_apply_guitar_low_end_recovery_default_off(), test_apply_low_end_restore_boost_raises_low_band_share(), test_apply_low_end_restore_zero_db_is_noop(), test_apply_sub_bass_debleed_reduces_low_band_share(), test_collect_named_stems_filters_to_requested_names(), test_guitar_ft_weights_cached_false_when_missing(), test_isolate_config_clamps_low_end_restore_db(), test_isolate_config_sub_bass_debleed_defaults_off() (+15 more)
 
 ### Community 7 - "roformer.py"
-Cohesion: 0.07
-Nodes (34): get_desktop_probe(), bs_roformer_sw_paths(), _canonical_stem_name(), _cap_cpu_threads(), collect_canonical_stems(), collect_named_stems(), _demix_track(), download_bs_roformer_sw_weights() (+26 more)
+Cohesion: 0.13
+Nodes (19): bs_roformer_sw_paths(), _cap_cpu_threads(), _demix_track(), download_bs_roformer_sw_weights(), download_melband_guitar_weights(), download_sha256_file(), file_sha256(), _instantiate_bs_roformer_model() (+11 more)
 
 ### Community 8 - "test_ingest.py"
-Cohesion: 0.12
-Nodes (11): format_youtube_duration(), _resolve_downloaded_wav(), _title_stem(), test_download_youtube_preview_rejects_non_youtube(), test_download_youtube_rejects_non_youtube(), test_format_youtube_duration(), test_resolve_downloaded_wav_no_candidates_raises(), test_resolve_downloaded_wav_no_title_match_uses_newest_normalized() (+3 more)
+Cohesion: 0.11
+Nodes (12): format_youtube_duration(), _resolve_downloaded_wav(), _title_stem(), test_download_youtube_preview_rejects_non_youtube(), test_download_youtube_rejects_non_youtube(), test_format_youtube_duration(), test_resolve_downloaded_wav_no_candidates_raises(), test_resolve_downloaded_wav_no_title_match_uses_newest_normalized() (+4 more)
 
-### Community 9 - "ingest.py"
+### Community 9 - "download_youtube_audio"
 Cohesion: 0.16
-Nodes (13): _clear_ytdlp_cache(), download_direct_media(), download_youtube_audio(), download_youtube_preview_video(), _is_403_error(), _take_preview_download(), _unlink_quiet(), _user_facing_youtube_error() (+5 more)
+Nodes (13): _cleanup_attempt_artifacts(), _clear_ytdlp_cache(), download_youtube_audio(), download_youtube_preview_video(), _snapshot_dir(), _take_preview_download(), _unlink_quiet(), _youtube_debug_enabled() (+5 more)
 
 ### Community 10 - "tab_pdf.py"
-Cohesion: 0.19
-Nodes (15): default_guitar_track_option(), guitar_track_radio_ids(), normalize_guitar_track_selection(), _capo_label(), _clear_song(), _clock(), _download_name(), _init_setup_state() (+7 more)
+Cohesion: 0.13
+Nodes (19): ffmpeg_available(), default_guitar_track_option(), guitar_track_radio_ids(), normalize_guitar_track_selection(), _apply_transcription_preset(), _capo_label(), _clear_song(), _clock() (+11 more)
 
 ### Community 11 - "isolate.py"
 Cohesion: 0.11
-Nodes (20): analyze_guitar_stem_quality(), apply_fold_other_gain_search(), apply_fold_other_into_guitar(), apply_guitar_low_end_recovery(), apply_low_end_restore(), _apply_peak_limit(), apply_sub_bass_debleed(), _bandpass_audio() (+12 more)
+Nodes (19): analyze_guitar_stem_quality(), apply_fold_other_gain_search(), apply_fold_other_into_guitar(), apply_low_end_restore(), _apply_peak_limit(), apply_sub_bass_debleed(), _bandpass_audio(), _drop_other_stem() (+11 more)
 
 ### Community 12 - "pathlib"
-Cohesion: 0.11
-Nodes (12): main(), _cap_onset_density(), cleanup_midi(), CleanupConfig, merge_instruments_to_one(), mix_aware_cleanup_config(), solo_guitar_cleanup_config(), _cleanup_config_for_pipeline() (+4 more)
+Cohesion: 0.12
+Nodes (9): 16. MIDI Cleanup May Remove Valid Notes, _cap_onset_density(), cleanup_midi(), CleanupConfig, estimate_tempo_bpm(), merge_instruments_to_one(), mix_aware_cleanup_config(), solo_guitar_cleanup_config() (+1 more)
 
 ### Community 13 - "search_youtube_videos"
-Cohesion: 0.09
-Nodes (8): search_youtube_videos(), _thumbnail_url_for_entry(), YouTubeSearchError, test_search_youtube_videos_clamps_fetch_to_50(), test_search_youtube_videos_rejects_blank_query(), test_search_youtube_videos_uses_ytsearch_and_maps_hits(), test_search_youtube_videos_wraps_backend_errors(), test_thumbnail_url_prefers_entry_then_cdn_fallback()
+Cohesion: 0.08
+Nodes (8): search_youtube_videos(), _thumbnail_url_for_entry(), test_search_youtube_videos_clamps_fetch_to_50(), test_search_youtube_videos_offset_slices_page(), test_search_youtube_videos_rejects_blank_query(), test_search_youtube_videos_uses_ytsearch_and_maps_hits(), test_search_youtube_videos_wraps_backend_errors(), test_thumbnail_url_prefers_entry_then_cdn_fallback()
 
-### Community 14 - "run_pipeline"
-Cohesion: 0.25
-Nodes (5): main(), count_midi_notes(), _require_usable_transcription(), run_pipeline(), _trim_audio()
+### Community 14 - "audio_to_tab/pipeline.py"
+Cohesion: 0.18
+Nodes (8): count_midi_notes(), _require_usable_transcription(), run_pipeline(), _separate_progress_label(), _trim_audio(), subprocess_run_kwargs(), tab_document_for(), test_pipeline_trim_raises_on_ffmpeg_failure()
 
 ### Community 15 - "test_hardware.py"
-Cohesion: 0.12
-Nodes (21): desktop_device_options(), resolve_desktop_speed(), test_apply_recommended_cpu_threads_skips_gpu(), test_both_edition_balanced_speed_uses_cpu_when_no_nvidia_gpu(), test_both_edition_faster_speed_uses_cpu_when_no_nvidia_gpu(), test_both_edition_offers_cuda_even_without_gpu(), test_both_edition_windows_device_options_gpu_first(), test_cuda_edition_windows_device_options_cuda_only() (+13 more)
+Cohesion: 0.11
+Nodes (21): desktop_device_options(), resolve_desktop_speed(), _cpu_edition_by_default(), test_both_edition_balanced_speed_uses_cpu_when_no_nvidia_gpu(), test_both_edition_faster_speed_uses_cpu_when_no_nvidia_gpu(), test_both_edition_offers_cuda_even_without_gpu(), test_both_edition_windows_device_options_gpu_first(), test_cuda_edition_windows_device_options_cuda_only() (+13 more)
 
 ### Community 16 - "separate.py"
-Cohesion: 0.14
-Nodes (6): apply_recommended_cpu_threads(), run_demucs(), JobAborted, run_process(), _stop_process(), subprocess_run_kwargs()
+Cohesion: 0.11
+Nodes (10): install_soundfile_writer(), apply_recommended_cpu_threads(), effective_demucs_segment(), remap_guitar_ft_state_dict(), run_demucs(), _run_demucs_guitar_cli(), JobAborted, run_process() (+2 more)
 
 ### Community 17 - "tab_generate.py"
-Cohesion: 0.17
-Nodes (12): Global Constraints, Task 2: Chords, capo, transpose, tuning, _filter_playable_positions(), _group_notes_into_events(), midi_to_tab(), _pick_chord_positions(), search(), _pick_single_position() (+4 more)
+Cohesion: 0.12
+Nodes (18): Global Constraints, Rulings, Tab result page implementation plan, Task 1: Staff wrap, Task 2: Chords, capo, transpose, tuning, Task 4: Pipeline stages, Task 6: Verify, _filter_playable_positions() (+10 more)
 
 ### Community 18 - "test_result_studio.py"
 Cohesion: 0.18
@@ -195,75 +202,75 @@ Nodes (18): Review Focus, placed_note(), clamp_playback_rate(), download_menu(),
 
 ### Community 19 - "hardware.py"
 Cohesion: 0.10
-Nodes (14): _both_edition_windows(), _cuda_only_edition_windows(), _darwin_available_ram_gb(), _darwin_swap_used_gb(), lite_accelerator_available(), lite_device_choice_ids(), lite_device_plain_label(), _platform() (+6 more)
+Nodes (15): 23. Memory Pressure Detection Edge Cases, _both_edition_windows(), _cuda_only_edition_windows(), _darwin_available_ram_gb(), _darwin_swap_used_gb(), lite_accelerator_available(), lite_device_choice_ids(), lite_device_plain_label() (+7 more)
 
 ### Community 20 - "notation_view.py"
-Cohesion: 0.15
-Nodes (14): Task 3: Views, bars per line, downloads, player model, align_chords_to_lyrics(), chord_diagram_svg(), clamp_bars_per_line(), measure_count(), measure_rows(), _measure_seconds(), piano_roll_svg() (+6 more)
+Cohesion: 0.13
+Nodes (13): measure_count(), measure_rows(), _measure_seconds(), piano_roll_svg(), screen_tab_text(), tab_staff_svg(), _split_body(), strip_ansi_csi() (+5 more)
 
 ### Community 21 - "HostProbe"
-Cohesion: 0.15
-Nodes (14): apple_chip_label(), desktop_recommend_caption(), desktop_system_summary(), HostProbe, _lite_accel_plain_label(), lite_auto_speed_id(), lite_detected_caption(), lite_using_caption() (+6 more)
+Cohesion: 0.18
+Nodes (14): 2. RoFormer Audio Length Limit (CRITICAL for Mac Users), desktop_recommend_caption(), desktop_system_summary(), HostProbe, lite_auto_speed_id(), roformer_max_audio_sec(), _refuse_long_roformer_audio(), test_cuda_edition_system_summary_shows_nvidia_not_cpu() (+6 more)
 
 ### Community 22 - "test_studio_ui.py"
-Cohesion: 0.11
-Nodes (16): Task 1: Studio theme tokens, test_entry_screen_css_has_one_hierarchy(), test_entry_screen_offers_two_sources(), test_hero_html_can_include_app_icon(), test_hero_html_is_title_only(), test_hero_sits_on_the_ground(), test_progress_row_puts_the_state_after_the_label(), test_result_header_html_shows_meta() (+8 more)
+Cohesion: 0.09
+Nodes (13): test_entry_screen_css_has_one_hierarchy(), test_entry_screen_offers_two_sources(), test_hero_html_can_include_app_icon(), test_hero_html_is_title_only(), test_hero_sits_on_the_ground(), test_progress_row_puts_the_state_after_the_label(), test_result_header_html_shows_meta(), test_score_panel_is_dark() (+5 more)
 
 ### Community 23 - "Path"
-Cohesion: 0.17
-Nodes (11): download_guitar_ft_weights(), _guitar_ft_digest_sidecar(), guitar_ft_weights_cached(), guitar_ft_weights_path(), guitar_ft_weights_sha256(), load_guitar_ft_state_dict(), remap_guitar_ft_state_dict(), run_demucs_guitar_ft_inprocess() (+3 more)
+Cohesion: 0.16
+Nodes (12): download_guitar_ft_weights(), _guitar_ft_digest_sidecar(), guitar_ft_weights_cached(), guitar_ft_weights_corrupt(), guitar_ft_weights_path(), guitar_ft_weights_sha256(), load_guitar_ft_state_dict(), run_demucs_guitar_ft_inprocess() (+4 more)
 
 ### Community 24 - "player_html"
-Cohesion: 0.15
-Nodes (14): File map, Global Constraints, Review Focus, Studio UI Hybrid Shell Implementation Plan, Task 2: Progress / hero shells, Task 3: Dark studio player, Task 4: Wire `tab_pdf.py` to the studio shell, Task 5: Full verification (+6 more)
+Cohesion: 0.17
+Nodes (14): File map, Global Constraints, Review Focus, Studio UI Hybrid Shell Implementation Plan, Task 1: Studio theme tokens, Task 2: Progress / hero shells, Task 3: Dark studio player, Task 5: Full verification (+6 more)
 
 ### Community 25 - "separate_stems"
-Cohesion: 0.10
-Nodes (19): progress(), separate_progress_message(), _abort_if(), apply_bass_bleed_mitigation(), apply_emit_stems(), _collect_stem_wavs(), IsolateConfig, _mark_stage_complete() (+11 more)
+Cohesion: 0.11
+Nodes (18): progress(), separate_progress_message(), _abort_if(), _collect_stem_wavs(), IsolateConfig, _mark_stage_complete(), _maybe_refine_guitar(), resolve_demucs_overlap() (+10 more)
 
 ### Community 26 - "common.py"
-Cohesion: 0.17
-Nodes (13): app_icon_data_uri(), app_icon_png(), list_recent_runs(), max_upload_caption(), max_upload_mb(), _resolve_data_dir(), run_output_dir(), _safe_upload_name() (+5 more)
+Cohesion: 0.16
+Nodes (12): app_icon_data_uri(), app_icon_png(), app_version(), ensure_src_path(), list_recent_runs(), max_upload_caption(), max_upload_mb(), _resolve_data_dir() (+4 more)
 
 ### Community 27 - "pdf_render.py"
-Cohesion: 0.12
-Nodes (9): main(), main(), _count_measures(), _events_in_measure(), render_structured_tab_pdf(), render_tab_pdf(), tab_document_to_pdf(), tab_to_ascii() (+1 more)
+Cohesion: 0.11
+Nodes (10): main(), main(), clamp_bars_per_line(), _count_measures(), _events_in_measure(), render_structured_tab_pdf(), render_tab_pdf(), tab_document_to_pdf() (+2 more)
 
 ### Community 28 - "test_youtube_search.py"
 Cohesion: 0.12
 Nodes (13): YouTubeSearchHit, test_hit_meta_joins_channel_and_duration(), test_hit_meta_keeps_only_the_parts_that_exist(), test_hit_state_serializes_a_search_hit(), test_normalize_page_accepts_int_and_numeric_string(), test_normalize_page_rejects_missing_and_out_of_range(), _close_youtube_search(), _run_youtube_search() (+5 more)
 
 ### Community 29 - "launcher.py"
-Cohesion: 0.19
-Nodes (12): health_ok(), log(), main(), on_closed(), on_shown(), pick_port(), port_free(), start_server() (+4 more)
+Cohesion: 0.17
+Nodes (13): health_ok(), log(), main(), on_closed(), on_shown(), pick_port(), port_free(), start_server() (+5 more)
 
 ### Community 30 - "test_tab.py"
-Cohesion: 0.21
-Nodes (10): test_cleanup_midi_writes_filtered(), test_dense_midi_tempo_not_inflated(), test_estimate_tempo_bpm_delegates_to_robust(), test_fret_assignment_avoids_large_jump_in_sequence(), test_midi_to_tab_simple(), test_onset_density_cap(), test_pdf_render(), test_positions_for_open_e() (+2 more)
+Cohesion: 0.23
+Nodes (9): test_cleanup_midi_writes_filtered(), test_dense_midi_tempo_not_inflated(), test_estimate_tempo_bpm_delegates_to_robust(), test_fret_assignment_avoids_large_jump_in_sequence(), test_midi_to_tab_simple(), test_onset_density_cap(), test_pdf_render(), test_resolve_tempo_override() (+1 more)
 
-### Community 31 - "scnet.py"
+### Community 31 - "rebake_metronome_artifact"
 Cohesion: 0.15
-Nodes (11): _demix_scnet(), download_scnet_weights(), is_scnet_available(), _load_audio_stereo(), _msst_normalize(), run_scnet_model(), scnet_weights_path(), _torch_device() (+3 more)
+Nodes (16): analysis_wav_for_downbeat(), attach_metronome_artifact(), _bpm_curve_from_payload(), coerce_metronome_rate(), coerce_metronome_render_options(), coerce_metronome_sound(), load_metronome_diagnostics(), _metronome_source_candidates() (+8 more)
 
 ### Community 32 - "separate_guitar_stem"
 Cohesion: 0.17
-Nodes (8): effective_demucs_segment(), is_guitar_refine_available(), _maybe_refine_guitar_stem(), _run_demucs_guitar_cli(), separate_guitar_stem(), _apply_low_end_recovery(), _maybe_bleed_gate(), _maybe_fold_other()
+Nodes (9): apply_guitar_low_end_recovery(), is_demucs_available(), separate_guitar_stem(), _apply_low_end_recovery(), _maybe_bleed_gate(), _maybe_fold_other(), test_apply_guitar_low_end_recovery_debleed_writes_diagnostics(), test_separate_guitar_stem_rejects_unknown_fold_mode() (+1 more)
 
 ### Community 33 - "tempo.py"
-Cohesion: 0.23
-Nodes (6): estimate_tempo_bpm(), _clamp_bpm(), estimate_tempo_from_audio(), estimate_tempo_from_midi_robust(), resolve_tempo(), TempoEstimate
+Cohesion: 0.29
+Nodes (5): _clamp_bpm(), estimate_tempo_from_audio(), estimate_tempo_from_midi_robust(), resolve_tempo(), TempoEstimate
 
-### Community 34 - "edition.py"
-Cohesion: 0.27
-Nodes (9): desktop_edition(), edition_app_name(), edition_display_label(), edition_file_candidates(), edition_product_name(), edition_ships_cuda_torch(), edition_window_title(), normalize_edition() (+1 more)
+### Community 34 - "Cons / Flaws (Especially Problematic)"
+Cohesion: 0.06
+Nodes (39): 10. Complex Interacting Options in Advanced Expander, 10. Cross-Platform Support, 11. No Audio Preview Before Conversion, 12. YouTube Search Limited and Error-Prone, 13. Progress Tracking Can Be Misleading, 15. No Batch or History Persistence Across Sessions, 18. Tempo Detection Can Be Wrong, 1. Well-Structured End-to-End Pipeline (+31 more)
 
 ### Community 35 - "Path"
-Cohesion: 0.16
-Nodes (10): attach_guitar_refine_backups(), ensure_guitar_prerefine_backup(), guitar_prerefine_path(), guitar_refined_path(), has_guitar_prerefine(), merge_two_pass_stems(), probe_duration_sec(), save_guitar_refined_backup() (+2 more)
+Cohesion: 0.11
+Nodes (9): ensure_guitar_prerefine_backup(), format_region_label_filename(), merge_two_pass_stems(), probe_duration_sec(), save_guitar_refined_backup(), _trim_audio(), is_guitar_refine_available(), run_guitar_refine() (+1 more)
 
 ### Community 36 - "player_bar.py"
-Cohesion: 0.22
-Nodes (5): player_click_times(), player_peaks(), player_source_labels(), player_speed(), synth_source_available()
+Cohesion: 0.13
+Nodes (12): Task 3: Views, bars per line, downloads, player model, align_chords_to_lyrics(), chord_diagram_svg(), player_click_times(), player_peaks(), player_source_labels(), player_speed(), synth_source_available() (+4 more)
 
 ### Community 37 - "desktop_recommend"
 Cohesion: 0.14
@@ -271,47 +278,43 @@ Nodes (11): desktop_recommend(), is_low_ram(), _preferred_gpu(), test_auto_cpu_o
 
 ### Community 38 - "Any"
 Cohesion: 0.15
-Nodes (4): AdaptiveFoldGainDiagnostics, FoldOtherDiagnostics, GuitarStemQualityDiagnostics, LowEndRestoreDiagnostics
+Nodes (4): AdaptiveFoldGainDiagnostics, FoldOtherDiagnostics, GuitarStemQualityDiagnostics, LowEndRecoveryDiagnostics
 
 ### Community 39 - "_execute_pending"
-Cohesion: 0.13
-Nodes (10): Rulings, Tab result page implementation plan, Task 1: Staff wrap, Task 4: Pipeline stages, Task 5: Streamlit result page, Task 6: Verify, EmptyTranscriptionError, apply_progress() (+2 more)
+Cohesion: 0.14
+Nodes (13): 4. Aggressive Transcription Thresholds, 7. MIDI Transcription Can Produce Too Few Notes, Task 4: Wire `tab_pdf.py` to the studio shell, Task 5: Streamlit result page, EmptyTranscriptionError, apply_progress(), new_checklist(), test_checklist_marks_a_skip_and_ignores_unknown_stages() (+5 more)
 
 ### Community 40 - "lite_auto_choice"
-Cohesion: 0.21
-Nodes (7): lite_auto_choice(), lite_auto_device(), memory_pressure_is_tight(), MemoryPressure, test_lite_auto_choice_keeps_gpu_under_memory_pressure(), test_memory_pressure_is_tight_thresholds(), test_probe_memory_pressure_darwin_parses_vm_stat()
+Cohesion: 0.19
+Nodes (8): 2. Comprehensive Hardware Probing and Recommendations, lite_auto_choice(), lite_auto_device(), memory_pressure_is_tight(), MemoryPressure, test_lite_auto_choice_keeps_gpu_under_memory_pressure(), test_memory_pressure_is_tight_thresholds(), test_probe_memory_pressure_darwin_parses_vm_stat()
 
 ### Community 41 - "normalize_audio"
-Cohesion: 0.17
-Nodes (7): normalize_audio(), _normalize_in_place(), _require_ffmpeg(), temporary_output_path(), test_normalize_audio_deletes_temp_on_failure(), test_normalize_audio_temp_output_is_caller_owned(), test_temporary_output_path_closes_fd_and_creates_file()
+Cohesion: 0.33
+Nodes (3): normalize_audio(), test_normalize_audio_deletes_temp_on_failure(), test_normalize_audio_temp_output_is_caller_owned()
 
-### Community 42 - "get_desktop_probe_without_torch"
-Cohesion: 0.18
-Nodes (7): get_desktop_probe_without_torch(), probe_cpu_brand(), probe_ram_gb(), roformer_max_audio_sec(), test_get_desktop_probe_without_torch_cuda_edition(), test_get_desktop_probe_without_torch_does_not_import_torch(), test_roformer_max_audio_sec()
+### Community 42 - "get_desktop_probe"
+Cohesion: 0.13
+Nodes (11): ensure_cuda_available(), get_desktop_probe(), get_desktop_probe_without_torch(), probe_cpu_brand(), probe_ram_gb(), probe_torch(), resolve_safe_device(), test_ensure_cuda_available_fail_closed() (+3 more)
 
 ### Community 43 - "lyrics.py"
-Cohesion: 0.27
-Nodes (7): _import_transcriber(), _lines_from_segments(), LyricLine, lyrics_skip_reason(), transcribe_lyrics(), test_lyrics_skip_reason_without_a_vocal_stem(), _lyric_lines()
+Cohesion: 0.36
+Nodes (5): 17. Lyrics Transcription Is Optional and May Fail Silently, _import_transcriber(), lyrics_skip_reason(), transcribe_lyrics(), test_lyrics_skip_reason_without_a_vocal_stem()
 
 ### Community 44 - "Studio UI redesign"
 Cohesion: 0.20
 Nodes (9): Anti-goals, Approaches, Constraints, Design (builder), Goals, Intent, Layout decisions (2026-11-11), Non-goals (+1 more)
 
-### Community 45 - "is_youtube_url"
-Cohesion: 0.25
-Nodes (5): is_direct_media_url(), is_youtube_url(), _watch_url_from_entry(), test_watch_url_from_flat_search_entry(), test_youtube_url_allowlist()
+### Community 45 - "ingest.py"
+Cohesion: 0.12
+Nodes (14): 14. YouTube URL Validation Is Minimal, 6. YouTube-Only URL Restriction, download_direct_media(), is_direct_media_url(), is_youtube_url(), _looks_like_video_id(), validate_youtube_url_shape(), _watch_url_from_entry() (+6 more)
 
-### Community 46 - "pathlib"
-Cohesion: 0.24
-Nodes (3): app_version(), ensure_src_path(), inject_studio_theme()
+### Community 46 - "YouTubeDownloadError"
+Cohesion: 0.11
+Nodes (7): FFmpegMissingError, probe_youtube_availability(), YouTubeDownloadError, YouTubeSearchError, RoFormerTooLongError, user_facing_message(), test_probe_youtube_unavailable_raises_user_error()
 
 ### Community 47 - "audiotabs"
 Cohesion: 0.25
 Nodes (7): About, audiotabs, Quickstart, Quickstart, Table of contents, Tester, Tester
-
-### Community 48 - "typing"
-Cohesion: 0.22
-Nodes (3): install_soundfile_writer(), main(), save_audio()
 
 ### Community 49 - "recommended_cpu_threads"
 Cohesion: 0.25
@@ -321,13 +324,9 @@ Nodes (6): cpu_thread_env(), _physical_perf_cores(), recommended_cpu_threads(), 
 Cohesion: 0.22
 Nodes (4): format_region_label(), format_time_sec(), RegionError, resolve_region()
 
-### Community 51 - "ensure_cuda_available"
-Cohesion: 0.29
-Nodes (5): ensure_cuda_available(), probe_torch(), resolve_safe_device(), test_ensure_cuda_available_fail_closed(), test_resolve_safe_device_downgrades_ineligible_mps()
-
-### Community 53 - "_YoutubeFileLogger"
-Cohesion: 0.23
-Nodes (4): _youtube_ydl_opts(), _YoutubeFileLogger, test_youtube_ydl_opts_forwards_file_logger_to_ytdlp(), test_youtube_ydl_opts_sets_noplaylist_and_client()
+### Community 51 - "metronome.py"
+Cohesion: 0.13
+Nodes (12): collapse_brief_octave_runs(), curve_confidence(), detect_beats_per_measure(), estimate_meter(), _fixed_window_rms(), _median_filter_1d(), MeterEstimate, octave_snap_bpm() (+4 more)
 
 ### Community 54 - "detect_present_stems"
 Cohesion: 0.29
@@ -337,45 +336,65 @@ Nodes (4): detect_present_stems(), _rms_to_dbfs(), _stem_rms(), StemPresence
 Cohesion: 0.29
 Nodes (5): load_scnet_model(), _scnet_architecture_module(), __init__(), test_load_scnet_model_strict(), test_scnet_architecture_output_shape()
 
-### Community 56 - "staff_wrap.py"
-Cohesion: 0.31
-Nodes (4): _split_body(), strip_ansi_csi(), _wrap_staff(), wrap_tab_staff()
+### Community 56 - "run_roformer_model"
+Cohesion: 0.12
+Nodes (11): _canonical_stem_name(), collect_canonical_stems(), collect_named_stems(), is_audio_separator_available(), is_roformer_available(), is_roformer_backend_available(), refine_guitar_from_stems(), run_melband_guitar() (+3 more)
 
 ### Community 57 - "blend_guitar_stems"
 Cohesion: 0.25
 Nodes (4): blend_guitar_stems(), EnsembleGuitarDiagnostics, _log_band_edges(), fake_blend()
 
-### Community 59 - "pytest"
-Cohesion: 0.32
-Nodes (4): is_demucs_available(), test_is_demucs_available(), _click_track(), test_estimate_tempo_from_real_audio()
+### Community 59 - "generate_metronome_stem"
+Cohesion: 0.22
+Nodes (9): build_click_times(), _conf_at(), _period_at(), _downsample_bpm_curve(), generate_metronome_stem(), integrate_tempo_curve(), local_period_at(), _onset_envelope() (+1 more)
 
-### Community 69 - "analyze_dual_guitar_candidate"
-Cohesion: 0.38
-Nodes (4): analyze_dual_guitar_candidate(), DualGuitarDiagnostics, _load_stereo(), split_dual_guitar_stem()
+### Community 63 - "PipelineConfig"
+Cohesion: 0.30
+Nodes (8): _apply_mix_aware_floors(), _cleanup_config_for_pipeline(), PipelineConfig, _transcription_thresholds(), test_cleanup_config_separated_mix_aware_raises_velocity(), test_cleanup_config_solo_mix_aware_flag_does_not_raise_velocity(), test_transcription_thresholds_separated_mix_aware_keeps_floors(), test_transcription_thresholds_solo_ignores_mix_aware_floors()
 
-### Community 73 - "show_convert_action"
-Cohesion: 0.67
-Nodes (3): format_size_kb(), show_convert_action(), test_file_chip_and_convert_visibility()
+### Community 64 - "lite_detected_caption"
+Cohesion: 0.25
+Nodes (5): apple_chip_label(), _lite_accel_plain_label(), lite_detected_caption(), test_apple_chip_label_only_keeps_apple_brands(), test_lite_detected_and_using_captions_plain_language()
+
+### Community 69 - "Path"
+Cohesion: 0.15
+Nodes (11): analyze_dual_guitar_candidate(), apply_bass_bleed_mitigation(), apply_emit_stems(), attach_guitar_refine_backups(), DualGuitarDiagnostics, guitar_prerefine_path(), guitar_refined_path(), has_guitar_prerefine() (+3 more)
+
+### Community 70 - "_is_403_error"
+Cohesion: 0.15
+Nodes (9): 1. YouTube Downloader Unreliability (CRITICAL), _is_403_error(), _user_facing_youtube_error(), test_download_youtube_preview_video_uses_capped_mp4(), __init__(), test_is_403_error(), test_is_403_error_reads_http_error_chain(), __init__() (+1 more)
+
+### Community 72 - "metronome_grid_times"
+Cohesion: 0.29
+Nodes (4): coerce_metronome_follow(), metronome_grid_times(), _render_times_for_follow(), steady_click_times()
+
+### Community 75 - "_require_ffmpeg"
+Cohesion: 0.33
+Nodes (5): 8. FFmpeg Dependency (Often Missing), ffmpeg_install_hint(), _require_ffmpeg(), test_ffmpeg_install_hint_mentions_platform(), test_require_ffmpeg_missing_raises_typed_hint()
+
+### Community 76 - "os"
+Cohesion: 0.33
+Nodes (3): _normalize_in_place(), temporary_output_path(), test_temporary_output_path_closes_fd_and_creates_file()
 
 ## Knowledge Gaps
 - **1 isolated node(s):** `audio-to-tab-pdf`
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 466 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **16 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 538 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **21 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `separate_guitar_stem()` connect `separate_guitar_stem` to `test_pipeline_guitar.py`, `roformer.py`, `normalize_audio`, `isolate.py`, `pathlib`, `run_pipeline`, `Path`, `blend_guitar_stems`, `pytest`, `apply_bleed_gate`, `scnet.py`?**
-  _High betweenness centrality (0.025) - this node is a cross-community bridge._
-- **Are the 13 inferred relationships involving `HostProbe` (e.g. with `test_auto_low_ram_mps_mac_stays_cpu()` and `test_desktop_system_summary_includes_apple_chip()`) actually correct?**
-  _`HostProbe` has 13 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `Cons / Flaws (Especially Problematic)` connect `Cons / Flaws (Especially Problematic)` to `tab_bundle.py`, `_is_403_error`, `_execute_pending`, `lyrics.py`, `pathlib`, `ingest.py`, `_require_ffmpeg`, `hardware.py`, `HostProbe`?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **Are the 8 inferred relationships involving `_render_entry()` (e.g. with `get_desktop_probe()` and `lite_accelerator_available()`) actually correct?**
+  _`_render_entry()` has 8 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `audio-to-tab-pdf` to the rest of the system?**
   _1 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `numpy` be split into smaller, more focused modules?**
-  _Cohesion score 0.05387397677517609 - nodes in this community are weakly interconnected._
-- **Why does `test_download_youtube_preview_video_uses_capped_mp4()` connect `test_download_youtube_preview_video_uses_capped_mp4` to `test_ingest.py`, `ingest.py`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
+  _Cohesion score 0.11260504201680673 - nodes in this community are weakly interconnected._
+- **Why does `Pros (Strengths)` connect `Cons / Flaws (Especially Problematic)` to `lite_auto_choice`?**
+  _High betweenness centrality (0.026) - this node is a cross-community bridge._
 - **Should `lead_rhythm.py` be split into smaller, more focused modules?**
   _Cohesion score 0.08287961282516637 - nodes in this community are weakly interconnected._
-- **Why does `test_search_youtube_videos_offset_slices_page()` connect `test_search_youtube_videos_offset_slices_page` to `test_ingest.py`, `search_youtube_videos`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
+- **Why does `test_download_guitar_ft_retries_then_succeeds()` connect `test_download_guitar_ft_retries_then_succeeds` to `test_pipeline_guitar.py`?**
+  _High betweenness centrality (0.024) - this node is a cross-community bridge._

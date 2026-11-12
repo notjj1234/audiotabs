@@ -98,21 +98,18 @@ def test_page_wires_studio_shell():
 
 
 def test_entry_screen_offers_two_sources():
-    """Screen 1 is one card with two rows: upload audio, then search YouTube.
-
-    A URL field on the entry screen would bring paste-and-fetch back; the
-    search dialog owns the URL, the disclaimer, and its errors.
-    """
+    """Screen 1 offers upload, YouTube search, and an optional paste-media URL."""
     page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
     source = page.read_text(encoding="utf-8")
     entry_at = source.find('key="tab_source_entry"')
     assert entry_at != -1
     upload_at = source.find("st.file_uploader(")
     youtube_at = source.find('key="tab_youtube_search_open_btn"')
-    assert upload_at != -1 and youtube_at != -1
+    paste_at = source.find("Paste media URL")
+    assert upload_at != -1 and youtube_at != -1 and paste_at != -1
     assert upload_at < youtube_at
     assert 'st.text_input("Or paste a YouTube URL")' not in source
-    assert "@st.dialog(\"Search YouTube\"" in source
+    assert '@st.dialog("Search YouTube"' in source
     assert "search_youtube_videos(" in source
     dialog = source[source.find("def _youtube_search_dialog") : source.find("def _render_player")]
     assert "st.caption(YOUTUBE_DISCLAIMER)" in dialog
@@ -193,10 +190,14 @@ def test_setup_controls_sit_ahead_of_advanced():
     advanced = entry.find('st.expander(\n        "Advanced"')
     if advanced < 0:
         advanced = entry.find('st.expander("Advanced"')
+    conversion = entry.find('st.expander("Conversion settings"')
     assert advanced > 0
+    assert conversion > 0
     assert entry.find('key="tab_setup_tuning"') < advanced
     assert entry.find('key="tab_separate_stems"') < advanced
-    assert advanced < entry.find('key="tab_max_duration_sec"')
+    assert conversion < advanced
+    assert entry.find('key="tab_max_duration_sec"') < advanced
+    assert entry.find('key="tab_expert_options"') > advanced
 
 
 def test_entry_screen_css_has_one_hierarchy():
@@ -214,3 +215,56 @@ def test_entry_screen_css_has_one_hierarchy():
     assert "Upload audio" in tile
     assert "MP3, WAV, M4A, FLAC" in tile
     assert "Public videos only" in tile
+
+
+def test_entry_warns_when_roformer_over_cap():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "RoFormer limit on this machine" in source
+    assert "Use Demucs instead" in source
+    assert 'key="tab_switch_demucs"' in source
+
+
+def test_safer_length_warning_copy_present():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "Only the first" in source and "will be transcribed" in source
+    assert 'key="tab_full_track_confirm"' in source
+
+
+def test_full_track_requires_confirm_checkbox():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "I understand this may be very slow / memory-heavy" in source
+    assert "Confirm the full-track warning" in source
+
+
+def test_expert_options_gate_thresholds():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert 'key="tab_expert_options"' in source
+    assert 'key="tab_onset_threshold"' in source
+    assert "Expert options" in source
+
+
+def test_entry_shows_duration_and_guitar_caution():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "Best results: clean solo guitar" in source
+    assert "Duration about" in source
+    assert 'key="tab_trim_start_sec"' in source
+
+
+def test_entry_accepts_direct_media_url_copy():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "Paste media URL" in source
+    assert "is_direct_media_url" in source
+    assert "download_direct_media" in source
+
+
+def test_tab_pdf_uses_guitar_ft_weights_cached_not_is_file():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "guitar_ft_weights_cached()" in source
+    assert "guitar_ft_weights_path().is_file()" not in source

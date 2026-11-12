@@ -31,9 +31,12 @@ _YOUTUBE_HOSTS = frozenset(
 
 # yt-dlp extractor-args retry ladder for public videos (YouTube 403 / SABR).
 # Attempt 1: skip android_sdkless (often 403). Attempt 2: web_safari HLS + tv_embedded.
+# Attempt 3–4: alternate clients when YouTube keeps rejecting the first pair.
 _YOUTUBE_PLAYER_CLIENTS = (
     "default,-android_sdkless",
     "web_safari,tv_embedded,-android_sdkless",
+    "ios,tv_embedded",
+    "web",
 )
 
 # Mixer slot is ~280px wide. 480p is enough for the picture and stays small on disk.
@@ -46,6 +49,20 @@ class YouTubeDownloadError(RuntimeError):
 
 class YouTubeSearchError(RuntimeError):
     """User-facing failure searching public YouTube videos (no API key)."""
+
+
+class FFmpegMissingError(RuntimeError):
+    """User-facing failure when ffmpeg is not on PATH."""
+
+
+def ffmpeg_install_hint(*, platform: str | None = None) -> str:
+    """Platform-specific install guidance for ffmpeg."""
+    plat = (platform or sys.platform).lower()
+    if plat.startswith("darwin"):
+        return "Install ffmpeg with Homebrew: brew install ffmpeg"
+    if plat.startswith("win"):
+        return "Install ffmpeg with winget: winget install ffmpeg (or choco install ffmpeg)"
+    return "Install ffmpeg with your package manager: sudo apt install ffmpeg"
 
 
 class _YoutubeFileLogger:
@@ -88,15 +105,79 @@ class YouTubeSearchHit:
     thumbnail_url: str
 
 
+def _youtube_host_ok(host: str) -> bool:
+    if host in _YOUTUBE_HOSTS:
+        return True
+    return host.endswith(".youtube.com")
+
+
+def _youtube_video_id(url: str) -> str | None:
+    """Extract a watch/shorts/live/youtu.be video id, or None."""
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not _youtube_host_ok(host):
+        return None
+    path = (parsed.path or "").rstrip("/")
+    parts = [p for p in path.split("/") if p]
+    if host in {"youtu.be", "www.youtu.be"} and parts:
+        candidate = parts[0]
+        return candidate if _looks_like_video_id(candidate) else None
+    qs = parse_qs(parsed.query or "")
+    if qs.get("v"):
+        candidate = qs["v"][0]
+        return candidate if _looks_like_video_id(candidate) else None
+    if len(parts) >= 2 and parts[0] in {"shorts", "live", "embed", "v"}:
+        candidate = parts[1]
+        return candidate if _looks_like_video_id(candidate) else None
+    return None
+
+
+def _looks_like_video_id(value: str) -> bool:
+    text = (value or "").strip()
+    # Real YouTube ids are usually 11 chars; allow short ids for tests/fixtures.
+    if not (3 <= len(text) <= 64):
+        return False
+    return all(ch.isalnum() or ch in {"-", "_"} for ch in text)
+
+
 def is_youtube_url(url: str) -> bool:
-    """Return True if ``url`` is an http(s) YouTube link."""
+    """Return True if ``url`` is an http(s) YouTube link with a video id."""
     parsed = urlparse((url or "").strip())
     if parsed.scheme not in {"http", "https"}:
         return False
     host = (parsed.hostname or "").lower().rstrip(".")
-    if host in _YOUTUBE_HOSTS:
-        return True
-    return host.endswith(".youtube.com")
+    if not _youtube_host_ok(host):
+        return False
+    return _youtube_video_id(url) is not None
+
+
+def validate_youtube_url_shape(url: str) -> bool:
+    """True when the URL looks like a specific public YouTube video."""
+    return is_youtube_url(url)
+
+
+def probe_youtube_availability(url: str) -> None:
+    """Lightweight playability check (no download). Raises YouTubeDownloadError."""
+    if not is_youtube_url(url):
+        raise ValueError("Only YouTube URLs are allowed")
+    import yt_dlp
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        raise _user_facing_youtube_error(exc, attempts=1) from exc
+    if not info:
+        raise YouTubeDownloadError(
+            "Could not verify this YouTube video. Only public videos work. "
+            "Upload the audio file instead."
+        )
 
 
 _DIRECT_MEDIA_SUFFIXES = frozenset({".mp3", ".wav", ".flac", ".m4a", ".mp4", ".mov", ".webm", ".mkv"})
@@ -140,8 +221,15 @@ def download_direct_media(url: str, output_dir: str | Path) -> Path:
 def _require_ffmpeg() -> str:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
-        raise RuntimeError("ffmpeg is required but not found on PATH")
+        raise FFmpegMissingError(
+            "ffmpeg is required but not found on PATH. " + ffmpeg_install_hint()
+        )
     return ffmpeg
+
+
+def ffmpeg_available() -> bool:
+    """True when ffmpeg is on PATH (no raise)."""
+    return shutil.which("ffmpeg") is not None
 
 
 def _youtube_debug_enabled() -> bool:
@@ -234,8 +322,21 @@ def _youtube_preview_ydl_opts(
 
 
 def _is_403_error(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return "403" in text or "unable to download video data" in text or "forbidden" in text
+    """True for HTTP 403 / forbidden download failures (walks the exception chain)."""
+    cur: BaseException | None = exc
+    for _ in range(8):
+        if cur is None:
+            break
+        text = str(cur).lower()
+        if "403" in text or "unable to download video data" in text or "forbidden" in text:
+            return True
+        code = getattr(cur, "code", None)
+        if code is None:
+            code = getattr(cur, "status", None)
+        if code == 403:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 def _clear_ytdlp_cache() -> None:
@@ -249,15 +350,31 @@ def _clear_ytdlp_cache() -> None:
         logger.debug("yt-dlp cache clear failed: %s", exc)
 
 
-def _user_facing_youtube_error(last_exc: BaseException | None) -> YouTubeDownloadError:
+def _user_facing_youtube_error(
+    last_exc: BaseException | None,
+    *,
+    attempts: int = 1,
+    last_client: str | None = None,
+) -> YouTubeDownloadError:
     detail = str(last_exc).strip() if last_exc else "unknown error"
     parts = [
         "Could not download this YouTube video.",
         "Only public videos work (no login).",
-        "Upload the audio file instead.",
     ]
     if _is_403_error(last_exc or Exception("")):
         parts.append("YouTube rejected the download (HTTP 403).")
+    parts.append(f"Tried {max(1, int(attempts))} download attempt(s)")
+    if last_client:
+        parts.append(f"(last player client: {last_client}).")
+    else:
+        parts.append(".")
+    parts.extend(
+        [
+            "Try again in a few minutes.",
+            "Paste a direct audio link if you have one.",
+            "Upload the audio file instead.",
+        ]
+    )
     parts.append(f"Details: {detail}")
     return YouTubeDownloadError(" ".join(parts))
 
@@ -441,6 +558,26 @@ def search_youtube_videos(
     return hits[start : start + page_size]
 
 
+def _snapshot_dir(path: Path) -> set[Path]:
+    if not path.is_dir():
+        return set()
+    return {p.resolve() for p in path.iterdir()}
+
+
+def _cleanup_attempt_artifacts(new_paths: set[Path]) -> None:
+    """Remove only files created by a failed download attempt."""
+    for path in new_paths:
+        if not path.exists():
+            continue
+        name = path.name
+        if (
+            path.suffix.lower() in {".wav", ".part", ".ytdl", ".temp"}
+            or ".part" in name
+            or name.endswith(".download.mp4")
+        ):
+            _unlink_quiet(path)
+
+
 def download_youtube_audio(url: str, output_dir: str | Path) -> Path:
     """Download audio from a public YouTube URL via yt-dlp.
 
@@ -456,14 +593,13 @@ def download_youtube_audio(url: str, output_dir: str | Path) -> Path:
     verbose = _youtube_debug_enabled()
     log_path = _youtube_log_path()
     last_exc: BaseException | None = None
+    last_client: str | None = None
 
     for index, player_client in enumerate(_YOUTUBE_PLAYER_CLIENTS):
+        last_client = player_client
         if index > 0:
             _clear_ytdlp_cache()
-            for stale in out_dir.glob("*.wav"):
-                _unlink_quiet(stale)
-            for stale in out_dir.glob("*.part"):
-                _unlink_quiet(stale)
+        before = _snapshot_dir(out_dir)
         opts = _youtube_ydl_opts(
             template=template,
             player_client=player_client,
@@ -479,6 +615,8 @@ def download_youtube_audio(url: str, output_dir: str | Path) -> Path:
             raise
         except Exception as exc:
             last_exc = exc
+            created = _snapshot_dir(out_dir) - before
+            _cleanup_attempt_artifacts(created)
             if log_path is not None:
                 try:
                     with log_path.open("a", encoding="utf-8") as log:
@@ -486,10 +624,14 @@ def download_youtube_audio(url: str, output_dir: str | Path) -> Path:
                 except OSError:
                     pass
             if not _is_403_error(exc) or index == len(_YOUTUBE_PLAYER_CLIENTS) - 1:
-                raise _user_facing_youtube_error(exc) from exc
+                raise _user_facing_youtube_error(
+                    exc, attempts=index + 1, last_client=player_client
+                ) from exc
             continue
 
-    raise _user_facing_youtube_error(last_exc)
+    raise _user_facing_youtube_error(
+        last_exc, attempts=len(_YOUTUBE_PLAYER_CLIENTS), last_client=last_client
+    )
 
 
 def download_youtube_preview_video(url: str, dest: str | Path) -> Path:
@@ -509,12 +651,13 @@ def download_youtube_preview_video(url: str, dest: str | Path) -> Path:
     verbose = _youtube_debug_enabled()
     log_path = _youtube_log_path()
     last_exc: BaseException | None = None
+    last_client: str | None = None
 
     for index, player_client in enumerate(_YOUTUBE_PLAYER_CLIENTS):
+        last_client = player_client
         if index > 0:
             _clear_ytdlp_cache()
-            for stale in target.parent.glob(f".{target.stem}.download.*"):
-                _unlink_quiet(stale)
+        before = _snapshot_dir(target.parent)
         opts = _youtube_preview_ydl_opts(
             template=template,
             player_client=player_client,
@@ -530,6 +673,8 @@ def download_youtube_preview_video(url: str, dest: str | Path) -> Path:
             raise
         except Exception as exc:
             last_exc = exc
+            created = _snapshot_dir(target.parent) - before
+            _cleanup_attempt_artifacts(created)
             if log_path is not None:
                 try:
                     with log_path.open("a", encoding="utf-8") as log:
@@ -537,10 +682,14 @@ def download_youtube_preview_video(url: str, dest: str | Path) -> Path:
                 except OSError:
                     pass
             if not _is_403_error(exc) or index == len(_YOUTUBE_PLAYER_CLIENTS) - 1:
-                raise _user_facing_youtube_error(exc) from exc
+                raise _user_facing_youtube_error(
+                    exc, attempts=index + 1, last_client=player_client
+                ) from exc
             continue
 
-    raise _user_facing_youtube_error(last_exc)
+    raise _user_facing_youtube_error(
+        last_exc, attempts=len(_YOUTUBE_PLAYER_CLIENTS), last_client=last_client
+    )
 
 
 def _take_preview_download(target: Path) -> Path:

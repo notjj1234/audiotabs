@@ -271,6 +271,19 @@ def _cap_cpu_threads(device: str) -> None:
     apply_recommended_cpu_threads(device=device)
 
 
+class RoFormerTooLongError(RuntimeError):
+    """User-facing refusal when audio exceeds the RoFormer RAM duration cap."""
+
+    def __init__(self, duration_sec: float, cap_sec: float):
+        self.duration_sec = float(duration_sec)
+        self.cap_sec = float(cap_sec)
+        super().__init__(
+            f"RoFormer refused this {self.duration_sec:.0f} s file "
+            f"(limit {self.cap_sec:.0f} s on this machine). "
+            "Shorten the section or use Demucs."
+        )
+
+
 def _refuse_long_roformer_audio(audio_path: Path) -> None:
     """Raise before allocating full-track RoFormer buffers on long audio."""
     from audio_to_tab.hardware import get_desktop_probe, roformer_max_audio_sec
@@ -283,10 +296,7 @@ def _refuse_long_roformer_audio(audio_path: Path) -> None:
     cap = roformer_max_audio_sec(probe)
     dur = probe_duration_sec(audio_path)
     if dur is not None and dur > cap:
-        raise RuntimeError(
-            f"RoFormer refused this {dur:.0f} s file (limit {cap:.0f} s on this "
-            "machine). Shorten the section or use Demucs."
-        )
+        raise RoFormerTooLongError(dur, cap)
 
 
 def _load_bs_roformer_config(yaml_path: Path):

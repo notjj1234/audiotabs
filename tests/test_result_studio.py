@@ -220,6 +220,7 @@ def test_file_chip_and_convert_visibility():
     assert show_convert_action(has_file=True, youtube_url="") is True
     assert show_convert_action(has_file=False, youtube_url="https://youtu.be/abcdefghijk") is True
     assert show_convert_action(has_file=False, youtube_url="https://example.com/song") is False
+    assert show_convert_action(has_file=False, youtube_url="https://cdn.example.com/song.mp3") is True
 
 
 def test_lyrics_skip_reason_without_a_vocal_stem():

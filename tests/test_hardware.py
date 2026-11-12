@@ -564,3 +564,23 @@ def test_cuda_only_edition_ignores_probe_because_cpu_is_not_offered(monkeypatch)
     assert desktop_device_options(CPU_MID, platform="win32") == ["cuda"]
     assert resolve_desktop_speed("faster", CPU_MID, platform="win32")["device"] == "cuda"
     assert desktop_recommend(CPU_MID, platform="win32")["device"] == "cuda"
+
+
+def test_refuse_long_roformer_raises_typed_error(tmp_path, monkeypatch):
+    from audio_to_tab.roformer import RoFormerTooLongError, _refuse_long_roformer_audio
+
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"x")
+    monkeypatch.setattr("audio_to_tab.isolate.probe_duration_sec", lambda _path: 400.0)
+    monkeypatch.setattr(
+        "audio_to_tab.hardware.roformer_max_audio_sec", lambda _probe=None: 90.0
+    )
+    monkeypatch.setattr(
+        "audio_to_tab.hardware.get_desktop_probe",
+        lambda **_k: HostProbe(cuda=False, mps=False, ram_gb=8.0),
+    )
+    with pytest.raises(RoFormerTooLongError) as caught:
+        _refuse_long_roformer_audio(audio)
+    assert caught.value.cap_sec == 90.0
+    assert caught.value.duration_sec == 400.0
+    assert "Demucs" in str(caught.value)

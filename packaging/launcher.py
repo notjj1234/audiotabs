@@ -124,6 +124,22 @@ def stop_server(server: subprocess.Popen | None) -> None:
         server.wait(timeout=5)
 
 
+def _warn_if_ffmpeg_missing() -> None:
+    """Non-fatal startup probe — UI also gates Convert when ffmpeg is missing."""
+    import shutil
+
+    if shutil.which("ffmpeg"):
+        return
+    try:
+        sys.path.insert(0, str(REPO_ROOT / "src"))
+        from audio_to_tab.ingest import ffmpeg_install_hint
+
+        hint = ffmpeg_install_hint()
+    except Exception:
+        hint = "Install ffmpeg and ensure it is on PATH"
+    log(f"WARNING: ffmpeg not found on PATH. {hint}")
+
+
 def main() -> int:
     if not APP.is_file():
         log(f"Missing Streamlit entrypoint: {APP}")
@@ -134,6 +150,7 @@ def main() -> int:
         log("pywebview is not installed. Run: pip install -e '.[desktop]'")
         return 1
 
+    _warn_if_ffmpeg_missing()
     port = pick_port()
     log(f"Starting Streamlit on 127.0.0.1:{port}")
     server = start_server(port)

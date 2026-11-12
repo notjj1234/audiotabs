@@ -44,7 +44,9 @@ MIN_USABLE_TAB_NOTES = 3
 
 EMPTY_TRANSCRIPTION_MESSAGE = (
     "Too few notes detected for a usable tab. "
-    "A cleaner solo-guitar clip is needed."
+    "A cleaner solo-guitar clip is needed. "
+    "Next: try the Solo / fingerstyle preset, turn off mix-aware filtering, "
+    "lower the onset threshold in Expert options, or use a shorter clean section."
 )
 
 
@@ -147,11 +149,19 @@ def _trim_audio(input_path: Path, max_duration_sec: float | None) -> Path:
     return out
 
 
+def _apply_mix_aware_floors(cfg: PipelineConfig) -> bool:
+    """Strict floors only for separated full mixes (not solo paths)."""
+    return bool(cfg.mix_aware_filtering and cfg.separate_stems)
+
+
 def _cleanup_config_for_pipeline(cfg: PipelineConfig) -> CleanupConfig:
-    base = mix_aware_cleanup_config() if cfg.mix_aware_filtering else solo_guitar_cleanup_config()
+    use_mix = _apply_mix_aware_floors(cfg)
+    base = mix_aware_cleanup_config() if use_mix else solo_guitar_cleanup_config()
     return CleanupConfig(
-        min_velocity=cfg.min_velocity if not cfg.mix_aware_filtering else max(cfg.min_velocity, base.min_velocity),
-        min_duration_sec=cfg.min_duration_sec if not cfg.mix_aware_filtering else max(cfg.min_duration_sec, base.min_duration_sec),
+        min_velocity=cfg.min_velocity if not use_mix else max(cfg.min_velocity, base.min_velocity),
+        min_duration_sec=(
+            cfg.min_duration_sec if not use_mix else max(cfg.min_duration_sec, base.min_duration_sec)
+        ),
         quantize_sec=cfg.quantize_sec,
         max_notes_per_onset=cfg.max_notes_per_onset,
     )
@@ -161,7 +171,7 @@ def _transcription_thresholds(cfg: PipelineConfig) -> tuple[float, float, float]
     onset = cfg.onset_threshold
     frame = cfg.frame_threshold
     min_len = cfg.minimum_note_length_ms
-    if cfg.mix_aware_filtering:
+    if _apply_mix_aware_floors(cfg):
         onset = max(onset, 0.58)
         frame = max(frame, 0.40)
         min_len = max(min_len, 90.0)

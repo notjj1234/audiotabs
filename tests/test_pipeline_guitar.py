@@ -409,3 +409,96 @@ def test_separate_guitar_stem_applies_sub_bass_debleed(tmp_path: Path, monkeypat
     data = json.loads(diag_path.read_text(encoding="utf-8"))
     assert data["attempted"] is True
     assert data["sub_bass_debleed_applied"] is True
+
+
+def test_download_guitar_ft_retries_then_succeeds(tmp_path, monkeypatch):
+    import hashlib
+    import time as time_mod
+
+    from audio_to_tab import separate as sep
+
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path))
+    monkeypatch.setattr(time_mod, "sleep", lambda _s: None)
+    calls = {"n": 0}
+    payload = b"guitar-ft-bytes-ok"
+    monkeypatch.setattr(sep, "GUITAR_FT_SHA256", hashlib.sha256(payload).hexdigest())
+
+    class Resp:
+        def __init__(self, data: bytes, status=200, headers=None):
+            self._data = data
+            self.status = status
+            self.headers = headers or {"Content-Length": str(len(data))}
+
+        def read(self, n=-1):
+            if not self._data:
+                return b""
+            chunk, self._data = self._data[:n], self._data[n:]
+            return chunk
+
+        def getcode(self):
+            return self.status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=120):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sep.urllib.error.URLError("boom")
+        return Resp(payload)
+
+    monkeypatch.setattr(sep.urllib.request, "urlopen", fake_urlopen)
+    path = sep.download_guitar_ft_weights(max_attempts=3)
+    assert path.is_file()
+    assert calls["n"] == 2
+
+
+def test_download_guitar_ft_resumes_partial_part_file(tmp_path, monkeypatch):
+    from audio_to_tab import separate as sep
+    import hashlib
+    import time as time_mod
+
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path))
+    monkeypatch.setattr(time_mod, "sleep", lambda _s: None)
+    full = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    digest = hashlib.sha256(full).hexdigest()
+    monkeypatch.setattr(sep, "GUITAR_FT_SHA256", digest)
+    part = sep.guitar_ft_weights_path().with_suffix(".pt.part")
+    part.parent.mkdir(parents=True, exist_ok=True)
+    part.write_bytes(full[:10])
+
+    class Resp:
+        status = 206
+        headers = {"Content-Length": str(len(full) - 10)}
+
+        def __init__(self):
+            self._data = full[10:]
+
+        def read(self, n=-1):
+            if not self._data:
+                return b""
+            chunk, self._data = self._data[:n], self._data[n:]
+            return chunk
+
+        def getcode(self):
+            return 206
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(sep.urllib.request, "urlopen", lambda *_a, **_k: Resp())
+    path = sep.download_guitar_ft_weights(force=True, max_attempts=1)
+    assert path.read_bytes() == full
+
+
+def test_guitar_ft_cache_hint_mentions_ui_not_missing_cli():
+    from audio_to_tab.separate import GUITAR_FT_CACHE_HINT
+
+    assert "audio-isolate" not in GUITAR_FT_CACHE_HINT
+    assert "Tab PDF" in GUITAR_FT_CACHE_HINT

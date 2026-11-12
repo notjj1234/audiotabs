@@ -521,3 +521,155 @@ def test_normalize_audio_temp_output_is_caller_owned(tmp_path, monkeypatch):
     # by no longer held by the engine's mkstemp FD.
     assert list(work.glob("audio_norm_*")) == [out]
     out.unlink()
+
+
+def test_require_ffmpeg_missing_raises_typed_hint(monkeypatch):
+    from audio_to_tab.ingest import FFmpegMissingError, _require_ffmpeg
+
+    monkeypatch.setattr("audio_to_tab.ingest.shutil.which", lambda _name: None)
+    with pytest.raises(FFmpegMissingError) as caught:
+        _require_ffmpeg()
+    msg = str(caught.value)
+    assert "ffmpeg" in msg.lower()
+    assert "brew" in msg.lower() or "winget" in msg.lower() or "apt" in msg.lower()
+
+
+def test_ffmpeg_install_hint_mentions_platform(monkeypatch):
+    from audio_to_tab.ingest import ffmpeg_install_hint
+
+    monkeypatch.setattr("audio_to_tab.ingest.sys.platform", "darwin")
+    assert "brew" in ffmpeg_install_hint().lower()
+    monkeypatch.setattr("audio_to_tab.ingest.sys.platform", "win32")
+    win = ffmpeg_install_hint().lower()
+    assert "winget" in win or "choco" in win
+    monkeypatch.setattr("audio_to_tab.ingest.sys.platform", "linux")
+    assert "apt" in ffmpeg_install_hint().lower()
+
+
+def test_is_403_error_reads_http_error_chain():
+    class FakeHTTPError(Exception):
+        def __init__(self):
+            super().__init__("HTTP Error")
+            self.code = 403
+
+    outer = Exception("download failed")
+    outer.__cause__ = FakeHTTPError()
+    assert _is_403_error(outer)
+    assert not _is_403_error(Exception("404 not found video unavailable"))
+
+
+def test_download_retries_three_clients_on_403(tmp_path, monkeypatch):
+    monkeypatch.setattr("audio_to_tab.ingest._clear_ytdlp_cache", lambda: None)
+    monkeypatch.setattr("audio_to_tab.ingest._unlink_quiet", lambda p: None)
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF")
+    monkeypatch.setattr("audio_to_tab.ingest.normalize_audio", lambda p, *_a, **_k: Path(p))
+    calls: list[str] = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.client = ",".join(opts["extractor_args"]["youtube"]["player_client"])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=True):
+            calls.append(self.client)
+            if len(calls) < 3:
+                raise Exception("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+            return {"title": "clip"}
+
+    with patch("yt_dlp.YoutubeDL", FakeYDL):
+        path = download_youtube_audio("https://www.youtube.com/watch?v=abc", tmp_path)
+    assert path == wav
+    assert len(calls) == 3
+
+
+def test_download_403_retry_does_not_delete_unrelated_wav(tmp_path, monkeypatch):
+    monkeypatch.setattr("audio_to_tab.ingest._clear_ytdlp_cache", lambda: None)
+    keep = tmp_path / "keep_me.wav"
+    keep.write_bytes(b"KEEP")
+    wav = tmp_path / "clip.wav"
+    calls: list[str] = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.client = ",".join(opts["extractor_args"]["youtube"]["player_client"])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=True):
+            calls.append(self.client)
+            if len(calls) == 1:
+                bad = tmp_path / "partial.wav"
+                bad.write_bytes(b"bad")
+                raise Exception("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+            wav.write_bytes(b"RIFF")
+            return {"title": "clip"}
+
+    monkeypatch.setattr("audio_to_tab.ingest.normalize_audio", lambda p, *_a, **_k: Path(p))
+    with patch("yt_dlp.YoutubeDL", FakeYDL):
+        path = download_youtube_audio("https://www.youtube.com/watch?v=abc", tmp_path)
+    assert path == wav
+    assert keep.read_bytes() == b"KEEP"
+    assert keep.exists()
+
+
+def test_user_facing_youtube_error_lists_recovery_steps():
+    from audio_to_tab.ingest import _user_facing_youtube_error
+
+    err = _user_facing_youtube_error(
+        Exception("HTTP Error 403: Forbidden"),
+        attempts=4,
+        last_client="web",
+    )
+    text = str(err)
+    assert "Upload" in text
+    assert "direct" in text.lower() or "paste" in text.lower() or "retry" in text.lower() or "Try again" in text
+    assert "403" in text
+
+
+def test_is_direct_media_url_accepts_and_blocks():
+    from audio_to_tab.ingest import is_direct_media_url
+
+    assert is_direct_media_url("https://cdn.example.com/song.mp3")
+    assert is_direct_media_url("https://files.example.com/a/b/track.wav")
+    assert not is_direct_media_url("https://www.youtube.com/watch?v=abcdefghijk")
+    assert not is_direct_media_url("https://example.com/page")
+    assert not is_direct_media_url("http://127.0.0.1/secret.mp3")
+    assert not is_direct_media_url("https://localhost/x.wav")
+
+
+def test_youtube_url_requires_video_id():
+    assert is_youtube_url("https://www.youtube.com/watch?v=abcdefghijk")
+    assert is_youtube_url("https://youtu.be/abcdefghijk")
+    assert not is_youtube_url("https://www.youtube.com/")
+    assert not is_youtube_url("https://youtube.com")
+
+
+def test_probe_youtube_unavailable_raises_user_error(monkeypatch):
+    from audio_to_tab.ingest import probe_youtube_availability
+
+    class Boom:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=False):
+            raise Exception("Private video")
+
+    with patch("yt_dlp.YoutubeDL", Boom):
+        with pytest.raises(YouTubeDownloadError):
+            probe_youtube_availability("https://www.youtube.com/watch?v=abcdefghijk")

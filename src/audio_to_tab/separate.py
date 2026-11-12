@@ -33,8 +33,7 @@ GUITAR_FT_URL = (
 GUITAR_FT_SHA256 = "4fde369e41582ba5c2759b6ab926a44af467c64d4566bf914374ab267b19260e"
 SUPPORTED_GUITAR_CHECKPOINTS = frozenset({GUITAR_FT_CHECKPOINT_ID})
 GUITAR_FT_CACHE_HINT = (
-    "Download the ~330 MB weights once from Audio Isolation Advanced "
-    "(or run audio-isolate --guitar-checkpoint htdemucs_6s_guitar_ft) and retry."
+    "Enable guitar-ft in Tab PDF Expert options for a one-time ~330 MB download, then retry."
 )
 
 
@@ -120,8 +119,26 @@ def verify_guitar_ft_weights(path: Path | None = None) -> Path:
     return target
 
 
-def download_guitar_ft_weights(*, force: bool = False) -> Path:
-    """Download guitar-ft weights into the torch cache (urllib, no huggingface_hub)."""
+def guitar_ft_weights_corrupt() -> bool:
+    """True when a file exists at the cache path but fails the pinned hash."""
+    path = guitar_ft_weights_path()
+    if not path.is_file():
+        return False
+    return not guitar_ft_weights_cached()
+
+
+def download_guitar_ft_weights(
+    *,
+    force: bool = False,
+    on_progress: Callable[[int, int | None], None] | None = None,
+    max_attempts: int = 3,
+) -> Path:
+    """Download guitar-ft weights into the torch cache (urllib, no huggingface_hub).
+
+    Resumes a ``.part`` file across retries with exponential backoff.
+    """
+    import time
+
     path = guitar_ft_weights_path()
     if path.exists() and not force:
         try:
@@ -131,33 +148,75 @@ def download_guitar_ft_weights(*, force: bool = False) -> Path:
             path.unlink(missing_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".part")
-    digest = hashlib.sha256()
-    try:
-        req = urllib.request.Request(
-            GUITAR_FT_URL, headers={"User-Agent": _USER_AGENT}
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp, tmp.open("wb") as out:
-            while True:
-                chunk = resp.read(1024 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-                digest.update(chunk)
-        if digest.hexdigest() != GUITAR_FT_SHA256:
-            raise RuntimeError(
-                f"guitar-ft download hash mismatch "
-                f"(got {digest.hexdigest()}, expected {GUITAR_FT_SHA256})"
-            )
-        tmp.replace(path)
-    except RuntimeError:
-        tmp.unlink(missing_ok=True)
-        raise
-    except (urllib.error.URLError, OSError) as exc:
-        tmp.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"Failed to download guitar-ft weights from {GUITAR_FT_URL}"
-        ) from exc
-    return verify_guitar_ft_weights(path)
+    last_exc: BaseException | None = None
+    attempts = max(1, int(max_attempts))
+
+    for attempt in range(attempts):
+        digest = hashlib.sha256()
+        existing = tmp.stat().st_size if tmp.is_file() else 0
+        headers = {"User-Agent": _USER_AGENT}
+        if existing > 0:
+            headers["Range"] = f"bytes={existing}-"
+        try:
+            req = urllib.request.Request(GUITAR_FT_URL, headers=headers)
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                status = getattr(resp, "status", None) or resp.getcode()
+                # Server ignored Range — restart from scratch.
+                if existing and status == 200:
+                    existing = 0
+                    tmp.unlink(missing_ok=True)
+                total_header = resp.headers.get("Content-Length")
+                total: int | None = None
+                if total_header and total_header.isdigit():
+                    body = int(total_header)
+                    total = existing + body if status == 206 else body
+                mode = "ab" if existing and status == 206 else "wb"
+                if mode == "wb":
+                    existing = 0
+                bytes_read = existing
+                if existing and tmp.is_file():
+                    with tmp.open("rb") as prior:
+                        while True:
+                            chunk = prior.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            digest.update(chunk)
+                with tmp.open(mode) as out:
+                    while True:
+                        chunk = resp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        digest.update(chunk)
+                        bytes_read += len(chunk)
+                        if on_progress is not None:
+                            on_progress(bytes_read, total)
+            if digest.hexdigest() != GUITAR_FT_SHA256:
+                raise RuntimeError(
+                    f"guitar-ft download hash mismatch "
+                    f"(got {digest.hexdigest()}, expected {GUITAR_FT_SHA256})"
+                )
+            tmp.replace(path)
+            return verify_guitar_ft_weights(path)
+        except RuntimeError as exc:
+            last_exc = exc
+            # Keep .part for resume unless hash already completed wrongly.
+            if "hash mismatch" in str(exc).lower():
+                tmp.unlink(missing_ok=True)
+            if attempt + 1 >= attempts:
+                raise
+        except (urllib.error.URLError, OSError) as exc:
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise RuntimeError(
+                    f"Failed to download guitar-ft weights from {GUITAR_FT_URL}. "
+                    f"{GUITAR_FT_CACHE_HINT}"
+                ) from exc
+        time.sleep(min(8.0, 0.5 * (2**attempt)))
+
+    raise RuntimeError(
+        f"Failed to download guitar-ft weights from {GUITAR_FT_URL}. {GUITAR_FT_CACHE_HINT}"
+    ) from last_exc
 
 
 def remap_guitar_ft_state_dict(
