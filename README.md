@@ -6,7 +6,8 @@
 </p>
 
 <h1 align="center">
-  <img src="assets/app-icon.png" alt="Tab PDF" width="160">
+  <!-- Mac/UI use assets/app-icon.png (rounded). Windows desktop uses assets/app-icon.ico (square). -->
+  <img src="assets/app-icon.png" alt="Tab PDF" width="160" style="border-radius: 22.37%;">
 </h1>
 
 <p align="center">
