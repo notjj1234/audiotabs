@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import pretty_midi
 
+from audio_to_tab.beatgrid import estimate_beat_grid
+
 logger = logging.getLogger(__name__)
 
 MIN_PLAUSIBLE_BPM = 60.0
@@ -20,7 +22,11 @@ TEMPO_DISAGREEMENT_RATIO = 0.15
 class TempoEstimate:
     bpm: float
     confidence: str  # "high" | "low"
-    source: str  # "audio" | "midi" | "override" | "default"
+    source: str  # "beat_this" | "audio" | "midi" | "override" | "default"
+    beats_per_measure: int = 4
+    downbeats: tuple[float, ...] = ()
+    anacrusis_sec: float = 0.0
+    beats: tuple[float, ...] = ()
 
 
 def _clamp_bpm(bpm: float) -> float:
@@ -91,12 +97,33 @@ def resolve_tempo(
     audio_path: str | Path | None,
     midi_path: str | Path,
     override_bpm: float | None = None,
+    beat_model: str = "beat_this",
 ) -> TempoEstimate:
-    """Pick best tempo from override, audio, or robust MIDI estimate."""
+    """Pick best tempo from override, beat model, audio, or robust MIDI estimate."""
+    grid = estimate_beat_grid(audio_path, model=beat_model) if audio_path else None
     if override_bpm is not None and override_bpm > 0:
-        return TempoEstimate(bpm=_clamp_bpm(override_bpm), confidence="high", source="override")
+        return TempoEstimate(
+            bpm=_clamp_bpm(override_bpm),
+            confidence="high",
+            source="override",
+            beats_per_measure=grid.beats_per_measure if grid else 4,
+            downbeats=grid.downbeats if grid else (),
+            anacrusis_sec=grid.anacrusis_sec if grid else 0.0,
+            beats=grid.beats if grid else (),
+        )
 
-    audio_est = estimate_tempo_from_audio(audio_path) if audio_path else None
+    if grid is not None:
+        audio_est = TempoEstimate(
+            bpm=grid.bpm,
+            confidence="high",
+            source="beat_this",
+            beats_per_measure=grid.beats_per_measure,
+            downbeats=grid.downbeats,
+            anacrusis_sec=grid.anacrusis_sec,
+            beats=grid.beats,
+        )
+    else:
+        audio_est = estimate_tempo_from_audio(audio_path) if audio_path else None
     pm = pretty_midi.PrettyMIDI(str(midi_path))
     midi_bpm = estimate_tempo_from_midi_robust(pm)
 
@@ -105,6 +132,22 @@ def resolve_tempo(
 
     ratio = abs(audio_est.bpm - midi_bpm) / max(audio_est.bpm, midi_bpm)
     if ratio > TEMPO_DISAGREEMENT_RATIO:
-        return TempoEstimate(bpm=audio_est.bpm, confidence="low", source="audio")
+        return TempoEstimate(
+            bpm=audio_est.bpm,
+            confidence="low",
+            source=audio_est.source,
+            beats_per_measure=audio_est.beats_per_measure,
+            downbeats=audio_est.downbeats,
+            anacrusis_sec=audio_est.anacrusis_sec,
+            beats=audio_est.beats,
+        )
 
-    return TempoEstimate(bpm=audio_est.bpm, confidence="high", source="audio")
+    return TempoEstimate(
+        bpm=audio_est.bpm,
+        confidence="high",
+        source=audio_est.source,
+        beats_per_measure=audio_est.beats_per_measure,
+        downbeats=audio_est.downbeats,
+        anacrusis_sec=audio_est.anacrusis_sec,
+        beats=audio_est.beats,
+    )

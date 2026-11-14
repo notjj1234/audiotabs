@@ -72,9 +72,9 @@ MELBAND_GUITAR_CKPT_SHA256 = "83472bbf125774af5282d2e0b86df89eaf2dd45e8a4ec8d68e
 MELBAND_GUITAR_YAML_SHA256 = "b681c3f886251b04b666b3f06e87ce65d7ec610e40b5d75915c01782e5444b0e"
 
 ROFORMER_INSTALL_HINT = (
-    "RoFormer guitar models need the optional extra: pip install -e \".[roformer]\" "
-    "(bs-roformer-infer). python-audio-separator is an alternate extra: "
-    "pip install -e \".[separator]\"."
+    "BS-RoFormer-SW needs: pip install -e \".[roformer]\". "
+    "MelBand guitar needs python-audio-separator: pip install -e \".[separator]\", "
+    "or a bs_roformer runtime with MelBand support."
 )
 
 _USER_AGENT = "audio-to-tab-pdf/1.0 (guitar isolation; urllib)"
@@ -96,9 +96,18 @@ def is_roformer_backend_available() -> bool:
     return is_roformer_available() or is_audio_separator_available()
 
 
+def _is_bs_melband_available() -> bool:
+    if not is_roformer_available():
+        return False
+    try:
+        return importlib.util.find_spec("bs_roformer.mel_band_roformer") is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 def is_guitar_refine_available() -> bool:
-    """True when the MelBand guitar specialist can run (refine extra)."""
-    return is_roformer_backend_available()
+    """True when an installed runtime supports the MelBand guitar specialist."""
+    return is_audio_separator_available() or _is_bs_melband_available()
 
 
 def separator_cache_dir() -> Path:
@@ -704,7 +713,7 @@ def run_melband_guitar(
     dest.mkdir(parents=True, exist_ok=True)
     ckpt, yaml_path = download_melband_guitar_weights()
 
-    if is_roformer_available():
+    if _is_bs_melband_available():
         try:
             found = _run_inprocess(
                 src,

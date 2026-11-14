@@ -15,6 +15,7 @@ from audio_to_tab.chords import (
     shifted_midi,
     sounding_semitones,
 )
+from audio_to_tab.gp5_export import write_guitar_pro
 from audio_to_tab.ingest import is_youtube_url
 from audio_to_tab.lyrics import LyricLine
 from audio_to_tab.pdf_render import render_structured_tab_pdf
@@ -26,6 +27,7 @@ DOWNLOAD_SPECS = (
     ("pdf", "PDF", "application/pdf"),
     ("midi", "MIDI", "audio/midi"),
     ("tab", "ASCII tab", "text/plain"),
+    ("gp5", "Guitar Pro 5", "application/x-guitar-pro"),
     ("guitar_stem", "Guitar stem", "audio/wav"),
 )
 
@@ -85,6 +87,8 @@ def tab_document_for(
     tuning_name: str,
     capo: int,
     transpose: int,
+    beats: tuple[float, ...] = (),
+    fingering_preference: str = "playable",
 ) -> TabDocument:
     semitones = sounding_semitones(transpose=transpose, capo=capo)
     opens, names = tuning_preset(tuning_name)
@@ -102,10 +106,11 @@ def tab_document_for(
             tempo_bpm=tempo_bpm,
             tempo_confidence=tempo_confidence,
             beats_per_measure=beats_per_measure,
+            fingering_preference=fingering_preference,
         )
     finally:
         temporary.unlink(missing_ok=True)
-    return quantize_tab_document(document, beats_per_measure=beats_per_measure)
+    return quantize_tab_document(document, beats_per_measure=beats_per_measure, beats=beats)
 
 
 def ascii_export(doc: TabDocument, *, capo: int, transpose: int) -> str:
@@ -154,6 +159,11 @@ def write_tab_exports(
     lyrics: list[LyricLine],
     lyrics_status: str,
     beats_per_measure: int,
+    downbeats: tuple[float, ...] = (),
+    anacrusis_sec: float = 0.0,
+    beats: tuple[float, ...] = (),
+    fingering_preference: str = "playable",
+    export_gp5: bool = False,
 ) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     tab_path = output_dir / "transcription.tab"
@@ -181,6 +191,10 @@ def write_tab_exports(
                 "transpose": transpose,
                 "bars_per_line": bars_per_line,
                 "beats_per_measure": beats_per_measure,
+                "beats": list(beats),
+                "downbeats": list(downbeats),
+                "anacrusis_sec": anacrusis_sec,
+                "fingering_preference": fingering_preference,
                 "chords": _chord_payload(chords),
                 "lyrics": _lyric_payload(lyrics),
                 "lyrics_status": lyrics_status,
@@ -188,7 +202,14 @@ def write_tab_exports(
         ),
         encoding="utf-8",
     )
-    return {"tab": tab_path, "pdf": pdf_path, "result": result_path}
+    written = {"tab": tab_path, "pdf": pdf_path, "result": result_path}
+    if export_gp5:
+        written["gp5"] = write_guitar_pro(
+            doc,
+            output_dir / "transcription.gp5",
+            title=title,
+        )
+    return written
 
 
 def key_for_midi(midi_path: Path, *, transpose: int, capo: int) -> str:

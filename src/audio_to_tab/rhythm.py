@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import math
+from bisect import bisect_right
+from collections.abc import Iterable
+from itertools import pairwise
+
 from audio_to_tab.tab_generate import TabDocument, TabEvent, TabNote
 
 
@@ -16,22 +21,54 @@ def quantize_time(t: float, grid_sec: float) -> float:
     return round(t / grid_sec) * grid_sec
 
 
+def _clean_beat_times(beats: Iterable[float] | None) -> tuple[float, ...]:
+    if beats is None:
+        return ()
+    values = sorted({float(beat) for beat in beats if math.isfinite(float(beat))})
+    if len(values) < 2 or any(b <= a for a, b in pairwise(values)):
+        return ()
+    return tuple(values)
+
+
+def _beat_grid_step(t: float, beats: tuple[float, ...], subdivisions: int) -> float:
+    index = max(0, min(bisect_right(beats, t) - 1, len(beats) - 2))
+    return (beats[index + 1] - beats[index]) / subdivisions
+
+
+def _quantize_beat_time(t: float, beats: tuple[float, ...], subdivisions: int) -> float:
+    index = max(0, min(bisect_right(beats, t) - 1, len(beats) - 2))
+    step = (beats[index + 1] - beats[index]) / subdivisions
+    return beats[index] + round((t - beats[index]) / step) * step
+
+
 def quantize_tab_document(
     doc: TabDocument,
     *,
     beats_per_measure: int = 4,
     subdivisions_per_beat: int = 4,
+    beats: Iterable[float] | None = None,
 ) -> TabDocument:
-    """Snap event starts and note ends to a 16th-note grid at doc.tempo_bpm."""
+    """Snap note timing to detected beats, or a constant-tempo 16th-note grid."""
+    beat_times = _clean_beat_times(beats)
     grid_sec = 60.0 / doc.tempo_bpm / subdivisions_per_beat
-    min_duration = grid_sec
 
     new_events: list[TabEvent] = []
     for event in doc.events:
-        q_start = quantize_time(event.start, grid_sec)
+        if beat_times:
+            q_start = max(
+                0.0,
+                _quantize_beat_time(event.start, beat_times, subdivisions_per_beat),
+            )
+            min_duration = _beat_grid_step(q_start, beat_times, subdivisions_per_beat)
+        else:
+            q_start = quantize_time(event.start, grid_sec)
+            min_duration = grid_sec
         new_notes: list[TabNote] = []
         for note in event.notes:
-            q_end = quantize_time(note.end, grid_sec)
+            if beat_times:
+                q_end = _quantize_beat_time(note.end, beat_times, subdivisions_per_beat)
+            else:
+                q_end = quantize_time(note.end, grid_sec)
             q_end = max(q_start + min_duration, q_end)
             new_notes.append(
                 TabNote(

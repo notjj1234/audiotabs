@@ -12,12 +12,12 @@ from audio_to_tab.rhythm import quantize_tab_document
 from audio_to_tab.separate import is_demucs_available
 from audio_to_tab.tab_generate import (
     DEFAULT_MAX_FRET,
+    _pick_single_position,
     midi_to_tab,
     tab_to_ascii,
-    _pick_single_position,
 )
 from audio_to_tab.tempo import estimate_tempo_from_midi_robust, resolve_tempo
-from audio_to_tab.tuning import positions_for_pitch, STANDARD_TUNING_MIDI
+from audio_to_tab.tuning import STANDARD_TUNING_MIDI, positions_for_pitch
 
 
 def test_is_demucs_available():
@@ -133,6 +133,31 @@ def test_fret_assignment_prefers_near_position():
     assert abs(chosen.fret - 5.0) < 8
 
 
+def test_fingering_preference_selects_low_fret_or_current_position():
+    positions = positions_for_pitch(69, STANDARD_TUNING_MIDI)
+
+    low_fret = _pick_single_position(
+        positions,
+        hand_fret=10.0,
+        prev_string=None,
+        penalize_open=True,
+        fingering_preference="low_fret",
+    )
+    position = _pick_single_position(
+        positions,
+        hand_fret=10.0,
+        prev_string=None,
+        penalize_open=True,
+        fingering_preference="position",
+    )
+
+    assert low_fret.fret == min(pos.fret for pos in positions)
+    assert position.fret == min(
+        (pos.fret for pos in positions),
+        key=lambda fret: abs(fret - 10.0),
+    )
+
+
 def test_fret_assignment_avoids_large_jump_in_sequence(tmp_path: Path):
     pm = pretty_midi.PrettyMIDI()
     guitar = pretty_midi.Instrument(program=25)
@@ -162,6 +187,25 @@ def test_quantize_tab_document_snaps_timing():
     )
     q = quantize_tab_document(doc)
     assert q.events[0].start == pytest.approx(0.05, abs=0.06)
+
+
+def test_quantize_tab_document_uses_detected_beat_origin():
+    from audio_to_tab.tab_generate import TabDocument, TabEvent, TabNote
+
+    doc = TabDocument(
+        events=[
+            TabEvent(
+                start=0.60,
+                notes=[TabNote(start=0.60, end=0.93, string=5, fret=3, pitch=67)],
+            )
+        ],
+        tempo_bpm=120.0,
+    )
+
+    quantized = quantize_tab_document(doc, beats=(0.20, 0.70, 1.20, 1.70))
+
+    assert quantized.events[0].start == pytest.approx(0.575)
+    assert quantized.events[0].notes[0].end == pytest.approx(0.95)
 
 
 def test_cleanup_midi_writes_filtered(tmp_path: Path):

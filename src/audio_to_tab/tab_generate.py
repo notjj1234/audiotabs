@@ -67,8 +67,13 @@ def _position_cost(
     prev_string: int | None,
     *,
     penalize_open: bool,
+    fingering_preference: str = "playable",
 ) -> float:
     cost = abs(pos.fret - hand_fret)
+    if fingering_preference == "low_fret":
+        cost = 0.25 * cost + pos.fret
+    elif fingering_preference == "position":
+        cost *= 3.0
     if prev_string is not None and pos.string != prev_string:
         cost += STRING_CHANGE_COST * abs(pos.string - prev_string)
     if penalize_open and pos.fret == 0 and hand_fret > OPEN_STRING_PENALTY_THRESHOLD:
@@ -98,11 +103,18 @@ def _pick_single_position(
     prev_string: int | None,
     *,
     penalize_open: bool,
+    fingering_preference: str = "playable",
 ) -> FretPosition:
     """Pick fret position minimizing playability cost."""
     return min(
         positions,
-        key=lambda p: _position_cost(p, hand_fret, prev_string, penalize_open=penalize_open),
+        key=lambda p: _position_cost(
+            p,
+            hand_fret,
+            prev_string,
+            penalize_open=penalize_open,
+            fingering_preference=fingering_preference,
+        ),
     )
 
 
@@ -112,6 +124,7 @@ def _pick_chord_positions(
     hand_fret: float,
     max_fret: int,
     max_fret_span: int = 5,
+    fingering_preference: str = "playable",
 ) -> list[FretPosition]:
     """Assign string/fret for a chord minimizing span and hand movement."""
     candidates_per_pitch = [
@@ -127,7 +140,15 @@ def _pick_chord_positions(
     if not candidates_per_pitch:
         return []
     if len(candidates_per_pitch) == 1:
-        return [_pick_single_position(candidates_per_pitch[0], hand_fret, None, penalize_open=True)]
+        return [
+            _pick_single_position(
+                candidates_per_pitch[0],
+                hand_fret,
+                None,
+                penalize_open=True,
+                fingering_preference=fingering_preference,
+            )
+        ]
 
     best_combo: list[FretPosition] | None = None
     best_score = float("inf")
@@ -139,7 +160,12 @@ def _pick_chord_positions(
                 return
             span = max(frets) - min(frets)
             center = sum(frets) / len(frets)
-            score = span * 10 + abs(center - hand_fret)
+            movement = abs(center - hand_fret)
+            score = span * 10 + movement
+            if fingering_preference == "low_fret":
+                score = span * 10 + 0.25 * movement + center
+            elif fingering_preference == "position":
+                score = span * 10 + 3.0 * movement
             if score < best_score:
                 best_score = score
                 best_combo = combo.copy()
@@ -180,8 +206,11 @@ def midi_to_tab(
     beats_per_measure: int = 4,
     max_fret: int = DEFAULT_MAX_FRET,
     tuning_names: tuple[str, ...] = STANDARD_TUNING_NAMES,
+    fingering_preference: str = "playable",
 ) -> TabDocument:
     """Convert MIDI file to structured tab document."""
+    if fingering_preference not in ("playable", "low_fret", "position"):
+        raise ValueError(f"Invalid fingering_preference: {fingering_preference!r}")
     pm = pretty_midi.PrettyMIDI(midi_path)
     notes: list[pretty_midi.Note] = []
     for inst in pm.instruments:
@@ -218,7 +247,11 @@ def midi_to_tab(
             if not positions:
                 continue
             chosen = _pick_single_position(
-                positions, hand_fret, prev_string, penalize_open=penalize_open
+                positions,
+                hand_fret,
+                prev_string,
+                penalize_open=penalize_open,
+                fingering_preference=fingering_preference,
             )
             hand_fret = 0.7 * hand_fret + 0.3 * chosen.fret
             prev_string = chosen.string
@@ -226,7 +259,13 @@ def midi_to_tab(
                 TabNote(start=start, end=group[0].end, string=chosen.string, fret=chosen.fret, pitch=chosen.pitch)
             ]
         else:
-            chosen_list = _pick_chord_positions(pitches, tuning, hand_fret, max_fret)
+            chosen_list = _pick_chord_positions(
+                pitches,
+                tuning,
+                hand_fret,
+                max_fret,
+                fingering_preference=fingering_preference,
+            )
             if not chosen_list:
                 continue
             frets = [c.fret for c in chosen_list]

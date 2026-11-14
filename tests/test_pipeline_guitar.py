@@ -9,13 +9,14 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from audio_to_tab.hardware import HostProbe
 from audio_to_tab.isolate import (
     IsolateConfig,
     apply_guitar_low_end_recovery,
     apply_low_end_restore,
     apply_sub_bass_debleed,
 )
-from audio_to_tab.pipeline import PipelineConfig
+from audio_to_tab.pipeline import PipelineConfig, resolve_guitar_model
 from audio_to_tab.roformer import collect_named_stems
 from audio_to_tab.separate import (
     GUITAR_FT_CHECKPOINT_ID,
@@ -26,7 +27,9 @@ from audio_to_tab.separate import (
 
 def test_pipeline_config_quality_backend_defaults():
     cfg = PipelineConfig()
-    assert cfg.model == "htdemucs_6s"
+    assert cfg.model == "auto"
+    assert cfg.fingering_preference == "playable"
+    assert cfg.export_gp5 is False
     assert cfg.guitar_checkpoint is None
     assert cfg.guitar_refine is False
     assert cfg.demucs_segment == 8
@@ -38,6 +41,56 @@ def test_pipeline_config_quality_backend_defaults():
     assert cfg.bleed_gate is False
     assert cfg.adaptive_fold_gain is False
     assert cfg.guitar_ensemble is False
+
+
+@pytest.mark.parametrize(
+    ("backend_available", "duration_sec", "expected"),
+    [
+        (True, 120.0, "melband_roformer_guitar"),
+        (True, 290.376, "htdemucs_6s"),
+        (False, 120.0, "htdemucs_6s"),
+        (True, 0.0, "htdemucs_6s"),
+    ],
+)
+def test_auto_guitar_model_requires_safe_roformer_runtime(
+    monkeypatch,
+    backend_available,
+    duration_sec,
+    expected,
+):
+    monkeypatch.setattr(
+        "audio_to_tab.roformer.is_guitar_refine_available",
+        lambda: backend_available,
+    )
+    monkeypatch.setattr(
+        "audio_to_tab.hardware.get_desktop_probe",
+        lambda: HostProbe(cuda=False, mps=True, ram_gb=16.0),
+    )
+
+    assert resolve_guitar_model("auto", duration_sec) == expected
+
+
+def test_bs_roformer_only_runtime_does_not_enable_melband(monkeypatch):
+    from audio_to_tab import roformer
+
+    monkeypatch.setattr(roformer, "is_roformer_available", lambda: True)
+    monkeypatch.setattr(roformer, "is_audio_separator_available", lambda: False)
+    monkeypatch.setattr(
+        roformer.importlib.util,
+        "find_spec",
+        lambda name: None if name == "bs_roformer.mel_band_roformer" else object(),
+    )
+
+    assert roformer.is_guitar_refine_available() is False
+
+
+def test_explicit_guitar_model_is_not_auto_replaced():
+    assert resolve_guitar_model("bs_roformer_sw", 120.0) == "bs_roformer_sw"
+
+
+def test_pipeline_rejects_unknown_fingering_preference():
+    with pytest.raises(ValueError, match="fingering_preference"):
+        PipelineConfig(fingering_preference="unknown")
 
 
 def test_isolate_config_sub_bass_debleed_defaults_off():

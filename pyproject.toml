@@ -26,6 +26,8 @@ demucs = ["demucs>=4.0", "torch>=2.2,<2.14", "torchaudio>=2.2,<2.12", "torchcode
 roformer = ["bs-roformer-infer>=0.1.5"]
 separator = ["audio-separator>=0.39.1"]
 scnet = ["torch>=2.2,<2.14"]
+beat = ["beat-this==1.1.0", "torch>=2.2,<2.14", "torchaudio>=2.2,<2.12"]
+gp5 = ["PyGuitarPro==0.11"]
 desktop = ["pywebview>=6.2,<7"]
 dev = ["pytest>=7.0", "ruff>=0.3"]
 
