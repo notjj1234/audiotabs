@@ -163,14 +163,52 @@ def test_player_waveform_and_fixed_transport():
     assert 'id="tab-loop"' in html and 'id="tab-metro"' in html
 
 
+def test_player_html_draws_playhead_on_raf():
+    from audio_to_tab.player_bar import player_html
+
+    html = player_html(peaks=[0.2, 0.8], duration=8.0, click_times=[0.0], audio_b64="")
+    assert "requestAnimationFrame" in html
+    assert "function paint(" in html
+    assert "audio.currentTime" in html
+    assert "(t / total) * w" in html
+    assert "#e8eaef" in html  # playhead stroke on dark waveform
+
+
+def test_chords_view_uses_aligned_blocks_not_a_line_dump():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    body = source[source.find("def _render_success") : source.find("def main")]
+    chords_branch = body[body.find('if view == "Chords":') : body.find('elif view == "Tab":')]
+    assert "chord_lyric_blocks" in chords_branch
+    assert "chord_lyric_block_html" in chords_branch
+    assert "align_chords_to_lyrics(chords" not in chords_branch
+    assert 'class="chord-names"' not in chords_branch.split("elif chords")[0]
+    assert "chord_lyric_block_html" in source
+
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    assert ".chord-lyric" in css
+    assert ".chord-row" in css
+    assert ".lyric-row" in css
+    assert "white-space: pre" in css
+
+
 def test_result_workspace_follows_the_song_page():
     page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
     source = page.read_text(encoding="utf-8")
     body = source[source.find("def _render_success") : source.find("def main")]
     assert '["Tab", "Chords", "Text", "Piano roll"]' in body
     assert 'key="tab_new_song"' in body
+    assert "Playback" in body
+    assert "Tab settings" in body
+    assert "Score view" in body
+    assert "Hearing: original audio" in body
+    assert "score_playhead_html" in body or "chords_playhead_html" in body
+    assert 'class="score-title"' not in body
     assert body.find("result_header_html") < body.find("_render_player")
-    assert body.find("_render_player") < body.find('key="tab_pdf_view"')
+    assert body.find("_render_player") < body.find('key="tab_result_tuning"')
+    assert body.find('key="tab_result_tuning"') < body.find('key="tab_pdf_view"')
     assert body.find('key="tab_pdf_view"') < body.find("studio-stage")
     assert "ink=" in body
 
@@ -190,14 +228,23 @@ def test_setup_controls_sit_ahead_of_advanced():
     advanced = entry.find('st.expander(\n        "Advanced"')
     if advanced < 0:
         advanced = entry.find('st.expander("Advanced"')
-    conversion = entry.find('st.expander("Conversion settings"')
     assert advanced > 0
-    assert conversion > 0
+    assert 'st.expander("Conversion settings"' not in entry
     assert entry.find('key="tab_setup_tuning"') < advanced
-    assert entry.find('key="tab_separate_stems"') < advanced
-    assert conversion < advanced
-    assert entry.find('key="tab_max_duration_sec"') < advanced
+    assert entry.find('key="tab_separate_stems"') > advanced
+    assert entry.find('key="tab_max_duration_sec"') > advanced
     assert entry.find('key="tab_expert_options"') > advanced
+    assert "if continue_ok:" in entry
+    # Advanced gated behind a source being present.
+    assert entry.find("if continue_ok:") < advanced
+
+
+def test_long_clip_player_mentions_tab_sync_unavailable():
+    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    player = source[source.find("def _render_player") : source.find("def _capo_label")]
+    assert "browser player" in player
+    assert "Position on the tab is unavailable" in player
 
 
 def test_entry_screen_css_has_one_hierarchy():

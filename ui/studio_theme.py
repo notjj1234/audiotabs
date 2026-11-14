@@ -418,6 +418,22 @@ div[data-baseweb="input"] > div,
   color: var(--studio-text);
   font-weight: 600;
 }}
+.studio-section-label {{
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--studio-muted) !important;
+  font-weight: 650;
+}}
+.studio-score .chord-lyric.is-active {{
+  outline: 1px solid var(--studio-accent);
+  border-radius: 8px;
+  background: rgba(232, 163, 23, 0.08);
+  padding: 0.25rem 0.4rem;
+  margin-left: -0.4rem;
+  margin-right: -0.4rem;
+}}
 .st-key-tab_pdf_view div[role="radiogroup"] {{
   gap: 0.4rem;
 }}
@@ -466,6 +482,25 @@ div[data-baseweb="input"] > div,
 }}
 .studio-score .lyric-line {{
   margin: 0 0 0.2rem;
+  color: var(--studio-text);
+}}
+.studio-score .chord-lyric {{
+  margin: 0 0 0.9rem;
+}}
+.studio-score .chord-row,
+.studio-score .lyric-row {{
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+  white-space: pre;
+}}
+.studio-score .chord-row {{
+  color: var(--studio-accent);
+  font-weight: 700;
+}}
+.studio-score .lyric-row {{
   color: var(--studio-text);
 }}
 .studio-score pre, .studio-score code {{

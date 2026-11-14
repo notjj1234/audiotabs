@@ -53,15 +53,15 @@ On Windows:
 
 ## Tester
 
-**Windows CPU**
+**Windows CPU** (once: `py -3.11 -m venv .venv311; .\.venv311\Scripts\python.exe -m pip install -U pip -e ".[demucs,desktop]"`)
 ```powershell
-$env:AUDIO_TOOLS_EDITOR = "cpu"
+$env:AUDIO_TOOLS_EDITION = "cpu"
 .\.venv311\Scripts\python.exe packaging/launcher.py
 ```
 
-**Windows GPU**
+**Windows GPU** (once: `py -3.11 -m venv .venv-desktop; .\.venv-desktop\Scripts\python.exe -m pip install -U pip -e ".[demucs,desktop,roformer]"`)
 ```powershell
-$env:AUDIO_TOOLS_EDITOR = "cuda"
+$env:AUDIO_TOOLS_EDITION = "cuda"
 .\.venv-desktop\Scripts\python.exe packaging/launcher.py
 ```
 
@@ -111,15 +111,15 @@ On Windows:
 
 ## Tester
 
-**Windows CPU**
+**Windows CPU** (once: `py -3.11 -m venv .venv311; .\.venv311\Scripts\python.exe -m pip install -U pip -e ".[demucs,desktop]"`)
 ```powershell
-$env:AUDIO_TOOLS_EDITOR = "cpu"
+$env:AUDIO_TOOLS_EDITION = "cpu"
 .\.venv311\Scripts\python.exe packaging/launcher.py
 ```
 
-**Windows GPU**
+**Windows GPU** (once: `py -3.11 -m venv .venv-desktop; .\.venv-desktop\Scripts\python.exe -m pip install -U pip -e ".[demucs,desktop,roformer]"`)
 ```powershell
-$env:AUDIO_TOOLS_EDITOR = "cuda"
+$env:AUDIO_TOOLS_EDITION = "cuda"
 .\.venv-desktop\Scripts\python.exe packaging/launcher.py
 ```
 

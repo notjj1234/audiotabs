@@ -53,10 +53,15 @@ from audio_to_tab.ingest import (  # noqa: E402
 from audio_to_tab.isolate import probe_duration_sec  # noqa: E402
 from audio_to_tab.lyrics import LyricLine  # noqa: E402
 from audio_to_tab.notation_view import (  # noqa: E402
-    align_chords_to_lyrics,
     chord_diagram_svg,
+    chord_lyric_block_html,
+    chord_lyric_blocks,
+    chords_playhead_html,
+    piano_roll_playhead_layout,
     piano_roll_svg,
+    score_playhead_html,
     screen_tab_text,
+    tab_playhead_layout,
     tab_staff_svg,
 )
 from audio_to_tab.pipeline import (  # noqa: E402
@@ -308,7 +313,10 @@ def _render_player(playback: Path | None, duration: float, tempo: float, title: 
         return
     if playback.stat().st_size > _PLAYER_BYTE_CAP:
         st.audio(str(playback))
-        st.caption("This clip is long, so playback uses the browser player.")
+        st.caption(
+            "This clip is long, so playback uses the browser player. "
+            "Position on the tab is unavailable for very large clips."
+        )
         return
     try:
         peaks = player_peaks(playback)
@@ -490,6 +498,22 @@ def _render_success(artifacts: dict) -> None:
     )
     st.caption("Check every note before you trust it.")
 
+    st.markdown('<p class="studio-section-label">Playback</p>', unsafe_allow_html=True)
+    playback_bits = ["Hearing: original audio"]
+    if artifacts.get("guitar_stem"):
+        playback_bits.append("Tab was transcribed from the guitar stem")
+    st.caption(" · ".join(playback_bits) + ".")
+    if st.session_state.get("tab_pdf_skipped_separation"):
+        st.caption(
+            "Ran without stem separation. Install Demucs for better full-mix results. "
+            f"{DEMUCS_INSTALL_HINT}"
+        )
+
+    playback_raw = artifacts.get("playback")
+    playback = Path(str(playback_raw)) if playback_raw else None
+    _render_player(playback, duration, tempo, str(title))
+
+    st.markdown('<p class="studio-section-label">Tab settings</p>', unsafe_allow_html=True)
     tuning_col, capo_col, transpose_col, bars_col = st.columns(4)
     with tuning_col:
         st.selectbox("Tuning", list(TUNING_PRESETS), key="tab_result_tuning")
@@ -505,75 +529,76 @@ def _render_success(artifacts: dict) -> None:
     with bars_col:
         st.selectbox("Bars", list(range(1, 9)), key="tab_result_bars")
 
-    if st.session_state.get("tab_pdf_skipped_separation"):
-        st.caption(
-            "Ran without stem separation. Install Demucs for better full-mix results. "
-            f"{DEMUCS_INSTALL_HINT}"
-        )
-
-    playback_raw = artifacts.get("playback")
-    playback = Path(str(playback_raw)) if playback_raw else None
-    _render_player(playback, duration, tempo, str(title))
-
     view = st.radio(
-        "View",
+        "Score view",
         ["Tab", "Chords", "Text", "Piano roll"],
         horizontal=True,
         key="tab_pdf_view",
-        label_visibility="collapsed",
     )
 
-    score_title = f'<h3 class="score-title">{escape(str(title))}</h3>'
+    use_html_js = False
     if view == "Chords":
-        chunks: list[str] = [score_title]
+        chunks: list[str] = []
         if lyric_lines:
-            for row in align_chords_to_lyrics(chords, lyric_lines):
-                if row["chords"]:
-                    names = "  ".join(escape(name) for name in row["chords"])
-                    chunks.append(f'<p class="chord-names">{names}</p>')
-                if row["text"]:
-                    chunks.append(f'<p class="lyric-line">{escape(row["text"])}</p>')
+            for block in chord_lyric_blocks(chords, lyric_lines):
+                chunks.append(chord_lyric_block_html(block))
         elif chords:
             for hit in chords:
                 chunks.append(
-                    f'<p class="chord-names">{escape(hit.name)}</p>'
-                    f'<p class="lyric-line">{escape(_clock(hit.start))}</p>'
+                    f'<div class="chord-lyric" data-start="{float(hit.start)}">'
+                    f'<div class="chord-row">{escape(hit.name)}</div>'
+                    f'<div class="lyric-row">{escape(_clock(hit.start))}</div>'
+                    "</div>"
                 )
         else:
             chunks.append("<p>No chords recognized in this clip.</p>")
         if lyrics_status:
             chunks.append(f'<p class="lyric-line"><em>{escape(lyrics_status)}</em></p>')
-        main_html = "".join(chunks)
+        main_html = chords_playhead_html("".join(chunks))
+        use_html_js = True
     elif view == "Tab":
         if document is None:
-            main_html = score_title + "<p>The MIDI for this run is gone, so the staff cannot be redrawn.</p>"
+            main_html = "<p>The MIDI for this run is gone, so the staff cannot be redrawn.</p>"
         else:
-            main_html = score_title + tab_staff_svg(
-                document, bars_per_line=bars, ink=_INK, line=_LINE
+            svg = tab_staff_svg(document, bars_per_line=bars, ink=_INK, line=_LINE)
+            main_html = score_playhead_html(
+                svg, tab_playhead_layout(document, bars_per_line=bars)
             )
+            use_html_js = True
     elif view == "Text":
         if document is None:
             tab_raw = artifacts.get("tab")
             tab_path = Path(str(tab_raw)) if tab_raw else None
             body = tab_path.read_text(encoding="utf-8") if tab_path and tab_path.is_file() else ""
             if not body:
-                main_html = score_title + "<p>The tab text for this run is gone.</p>"
+                main_html = "<p>The tab text for this run is gone.</p>"
             else:
-                main_html = score_title + f"<pre>{escape(body)}</pre>"
+                main_html = f"<pre>{escape(body)}</pre>"
         else:
-            main_html = score_title + f"<pre>{escape(screen_tab_text(document, bars))}</pre>"
+            main_html = f"<pre>{escape(screen_tab_text(document, bars))}</pre>"
     else:
         if midi_path is None or not midi_path.is_file():
-            main_html = score_title + "<p>The MIDI for this run is gone, so the piano roll cannot be drawn.</p>"
+            main_html = "<p>The MIDI for this run is gone, so the piano roll cannot be drawn.</p>"
         else:
-            main_html = score_title + piano_roll_svg(
-                _roll_notes(midi_path),
+            roll_notes = _roll_notes(midi_path)
+            svg = piano_roll_svg(
+                roll_notes,
                 tempo_bpm=tempo,
                 beats_per_measure=beats,
                 semitones=transpose + capo,
                 ink=_INK,
                 line=_LINE,
             )
+            main_html = score_playhead_html(
+                svg,
+                piano_roll_playhead_layout(
+                    roll_notes,
+                    tempo_bpm=tempo,
+                    beats_per_measure=beats,
+                    semitones=transpose + capo,
+                ),
+            )
+            use_html_js = True
 
     show_rail = view in {"Chords", "Tab"} and bool(chords)
     rail = ""
@@ -583,10 +608,11 @@ def _render_success(artifacts: dict) -> None:
             for hit in chords
         )
         rail = f'<aside class="studio-rail"><h4>Chords</h4><div class="diagrams">{diagrams}</div></aside>'
-    st.markdown(
-        f'<div class="studio-stage"><div class="studio-score">{main_html}</div>{rail}</div>',
-        unsafe_allow_html=True,
-    )
+    stage = f'<div class="studio-stage"><div class="studio-score">{main_html}</div>{rail}</div>'
+    if use_html_js:
+        st.html(stage, unsafe_allow_javascript=True)
+    else:
+        st.markdown(stage, unsafe_allow_html=True)
 
     details = st.session_state.get("tab_pdf_details") or {}
     with st.expander("Transcription details"):
@@ -722,21 +748,6 @@ def _render_entry() -> None:
             if st.session_state.get("_tab_last_preset") != preset:
                 _apply_transcription_preset(str(preset))
                 st.session_state["_tab_last_preset"] = preset
-            separate_stems = st.toggle(
-                "Separate guitar stem (full mixes only)",
-                disabled=not can_separate,
-                key="tab_separate_stems",
-                help=(
-                    "Off by default for solo guitar (faster, usually better). "
-                    "Turn on only for full mixes."
-                    + (f" Install Demucs to enable: {DEMUCS_INSTALL_HINT}" if not can_separate else "")
-                ),
-            )
-            if separate_stems and can_separate:
-                st.caption(
-                    "Full mixes often leave guitar bleed and wrong notes. "
-                    "Prefer a clean solo-guitar clip when you can."
-                )
             convert_disabled = not has_ffmpeg
             if continue_ok and st.button(
                 "Convert",
@@ -750,59 +761,14 @@ def _render_entry() -> None:
             title = str(st.session_state.get("tab_pdf_title") or "Guitar Tab")
             tuning_name = str(st.session_state.get("tab_setup_tuning") or "Standard (EADGBE)")
             capo = int(st.session_state.get("tab_setup_capo") or 0)
-            separate_stems = bool(st.session_state.get("tab_separate_stems"))
 
-        with st.expander("Conversion settings", expanded=True):
-            if not can_separate:
-                st.caption(f"Stem separation unavailable. {DEMUCS_INSTALL_HINT}")
-            safer_length = st.checkbox(
-                "Safer length (recommended)",
-                key="tab_safer_length",
-                help=(
-                    "Trims long clips before transcription. Tab PDF works best on short "
-                    "solo-guitar segments. Uncheck only if you need the full track."
-                ),
-            )
-            max_duration: float | None = None
-            full_track_ok = True
-            if safer_length:
-                max_duration = float(
-                    st.slider(
-                        "Max duration (seconds)",
-                        min_value=15,
-                        max_value=300,
-                        step=15,
-                        key="tab_max_duration_sec",
-                    )
-                )
-                if known_duration is not None and known_duration > max_duration:
-                    st.warning(
-                        f"Only the first {int(max_duration)} seconds will be transcribed "
-                        f"(clip is about {known_duration:.0f} s)."
-                    )
-            else:
-                st.caption(
-                    "Full track will be processed. This is slow and often worse for Tab PDF."
-                )
-                full_track_ok = bool(
-                    st.checkbox(
-                        "I understand this may be very slow / memory-heavy",
-                        key="tab_full_track_confirm",
-                    )
-                )
-            trim_start = 0.0
-            if uploaded is not None and has_ffmpeg and known_duration and known_duration > 5:
-                trim_start = float(
-                    st.slider(
-                        "Trim start (seconds)",
-                        min_value=0.0,
-                        max_value=max(0.0, float(known_duration) - 1.0),
-                        value=0.0,
-                        step=1.0,
-                        key="tab_trim_start_sec",
-                    )
-                )
-
+        separate_stems = bool(st.session_state.get("tab_separate_stems"))
+        safer_length = bool(st.session_state.get("tab_safer_length", True))
+        max_duration: float | None = (
+            float(st.session_state.get("tab_max_duration_sec") or 90) if safer_length else None
+        )
+        full_track_ok = bool(st.session_state.get("tab_full_track_confirm", False)) if not safer_length else True
+        trim_start = float(st.session_state.get("tab_trim_start_sec") or 0.0)
         tab_model = "htdemucs_6s"
         tab_guitar_refine = False
         tab_guitar_checkpoint = None
@@ -816,127 +782,194 @@ def _render_entry() -> None:
         onset_threshold = 0.5
         frame_threshold = 0.3
 
-        with st.expander("Advanced", expanded=False):
-            expert = st.checkbox(
-                "Expert options",
-                key="tab_expert_options",
-                help="Show engine surgery controls and raw transcription thresholds.",
-            )
-            if separate_stems and can_separate:
-                radio_ids = guitar_track_radio_ids(roformer_available=roformer_ok)
-                guitar_labels = {
-                    oid: TRACK_OPTIONS[oid]["label"] for oid in radio_ids if oid in TRACK_OPTIONS
-                }
-                promoted_default = default_guitar_track_option(
-                    roformer_available=roformer_ok,
-                    prefer_roformer=lite_accelerator_available(get_desktop_probe()),
+        if continue_ok:
+            with st.expander("Advanced", expanded=False):
+                if not can_separate:
+                    st.caption(f"Stem separation unavailable. {DEMUCS_INSTALL_HINT}")
+                safer_length = st.checkbox(
+                    "Safer length (recommended)",
+                    key="tab_safer_length",
+                    help=(
+                        "Trims long clips before transcription. Tab PDF works best on short "
+                        "solo-guitar segments. Uncheck only if you need the full track."
+                    ),
                 )
-                current_engine = str(st.session_state.get("tab_guitar_engine") or promoted_default)
-                if current_engine not in guitar_labels:
-                    st.session_state["tab_guitar_engine"] = normalize_guitar_track_selection(
-                        current_engine,
-                        roformer_available=roformer_ok,
-                    )
-                    if st.session_state["tab_guitar_engine"] not in guitar_labels:
-                        st.session_state["tab_guitar_engine"] = next(iter(guitar_labels))
-                engine = st.radio(
-                    "Guitar separation",
-                    options=list(guitar_labels.keys()),
-                    format_func=lambda oid: guitar_labels[oid],
-                    key="tab_guitar_engine",
-                )
-                tab_model, tab_guitar_refine = _tab_model_from_guitar_engine(str(engine))
-                roformer_cap = roformer_max_audio_sec(get_desktop_probe())
-                if tab_model == "bs_roformer_sw" and known_duration and known_duration > roformer_cap:
-                    st.warning(
-                        f"RoFormer limit on this machine is {roformer_cap:.0f} s; "
-                        f"this clip is about {known_duration:.0f} s. Shorten the section or use Demucs."
-                    )
-                    if st.button("Use Demucs instead", key="tab_switch_demucs"):
-                        st.session_state["tab_guitar_engine"] = "guitar_demucs_6s"
-                        st.rerun()
-                if tab_model == "htdemucs_6s":
-                    if guitar_ft_ok:
-                        if st.checkbox(
-                            "Use cached guitar-ft Demucs weights",
-                            value=False,
-                            key="tab_guitar_ft",
-                            help="Uses verified guitar-ft already in TORCH_HOME. Does not download.",
-                        ):
-                            tab_guitar_checkpoint = "htdemucs_6s_guitar_ft"
-                    elif guitar_ft_bad:
-                        st.caption(
-                            "guitar-ft cache looks corrupt (hash mismatch). "
-                            "Re-enable guitar-ft later to re-download the ~330 MB weights."
-                        )
-                    else:
-                        st.caption(
-                            "guitar-ft weights appear after a one-time ~330 MB download "
-                            "when first used by Demucs guitar-ft."
-                        )
-                if expert:
-                    if "tab_low_end_restore_db" not in st.session_state:
-                        st.session_state["tab_low_end_restore_db"] = 0.0
-                    if "tab_sub_bass_debleed" not in st.session_state:
-                        st.session_state["tab_sub_bass_debleed"] = False
-                    tab_low_end_restore_db = float(
+                max_duration = None
+                full_track_ok = True
+                if safer_length:
+                    max_duration = float(
                         st.slider(
-                            "Low-end restore (dB)",
+                            "Max duration (seconds)",
+                            min_value=15,
+                            max_value=300,
+                            step=15,
+                            key="tab_max_duration_sec",
+                        )
+                    )
+                    if known_duration is not None and known_duration > max_duration:
+                        st.warning(
+                            f"Only the first {int(max_duration)} seconds will be transcribed "
+                            f"(clip is about {known_duration:.0f} s)."
+                        )
+                else:
+                    st.caption(
+                        "Full track will be processed. This is slow and often worse for Tab PDF."
+                    )
+                    full_track_ok = bool(
+                        st.checkbox(
+                            "I understand this may be very slow / memory-heavy",
+                            key="tab_full_track_confirm",
+                        )
+                    )
+                trim_start = 0.0
+                if uploaded is not None and has_ffmpeg and known_duration and known_duration > 5:
+                    trim_start = float(
+                        st.slider(
+                            "Trim start (seconds)",
                             min_value=0.0,
-                            max_value=6.0,
+                            max_value=max(0.0, float(known_duration) - 1.0),
+                            value=0.0,
                             step=1.0,
-                            key="tab_low_end_restore_db",
-                            help="Boosts 60–200 Hz on the guitar stem before transcription. 0 = off.",
+                            key="tab_trim_start_sec",
                         )
                     )
-                    tab_sub_bass_debleed = st.checkbox(
-                        "Subtractive bass de-bleed",
-                        key="tab_sub_bass_debleed",
-                        help="Subtracts scaled bass/drum energy below ~150 Hz from the guitar stem.",
+
+                separate_stems = st.toggle(
+                    "Separate guitar stem (full mixes only)",
+                    disabled=not can_separate,
+                    key="tab_separate_stems",
+                    help=(
+                        "Off by default for solo guitar (faster, usually better). "
+                        "Turn on only for full mixes."
+                        + (f" Install Demucs to enable: {DEMUCS_INSTALL_HINT}" if not can_separate else "")
+                    ),
+                )
+                if separate_stems and can_separate:
+                    st.caption(
+                        "Full mixes often leave guitar bleed and wrong notes. "
+                        "Prefer a clean solo-guitar clip when you can."
                     )
-                    if tab_low_end_restore_db > 0 and tab_sub_bass_debleed:
-                        st.caption(
-                            "Low-end restore and bass de-bleed both change low frequencies; use one first."
+
+                expert = st.checkbox(
+                    "Expert options",
+                    key="tab_expert_options",
+                    help="Show engine surgery controls and raw transcription thresholds.",
+                )
+                if separate_stems and can_separate:
+                    radio_ids = guitar_track_radio_ids(roformer_available=roformer_ok)
+                    guitar_labels = {
+                        oid: TRACK_OPTIONS[oid]["label"] for oid in radio_ids if oid in TRACK_OPTIONS
+                    }
+                    promoted_default = default_guitar_track_option(
+                        roformer_available=roformer_ok,
+                        prefer_roformer=lite_accelerator_available(get_desktop_probe()),
+                    )
+                    current_engine = str(st.session_state.get("tab_guitar_engine") or promoted_default)
+                    if current_engine not in guitar_labels:
+                        st.session_state["tab_guitar_engine"] = normalize_guitar_track_selection(
+                            current_engine,
+                            roformer_available=roformer_ok,
                         )
-                    tab_bleed_gate = st.checkbox(
-                        "Spectral bleed gate",
-                        key="tab_bleed_gate",
-                        help="Scrubs leftover bass/cymbal flutter when competitor stems dominate.",
+                        if st.session_state["tab_guitar_engine"] not in guitar_labels:
+                            st.session_state["tab_guitar_engine"] = next(iter(guitar_labels))
+                    engine = st.radio(
+                        "Guitar separation",
+                        options=list(guitar_labels.keys()),
+                        format_func=lambda oid: guitar_labels[oid],
+                        key="tab_guitar_engine",
                     )
-                    tab_adaptive_fold_gain = st.checkbox(
-                        "Adaptive fold gain",
-                        key="tab_adaptive_fold_gain",
-                        help="Searches the Other→Guitar mix gain instead of the fixed 0.5.",
+                    tab_model, tab_guitar_refine = _tab_model_from_guitar_engine(str(engine))
+                    roformer_cap = roformer_max_audio_sec(get_desktop_probe())
+                    if tab_model == "bs_roformer_sw" and known_duration and known_duration > roformer_cap:
+                        st.warning(
+                            f"RoFormer limit on this machine is {roformer_cap:.0f} s; "
+                            f"this clip is about {known_duration:.0f} s. Shorten the section or use Demucs."
+                        )
+                        if st.button("Use Demucs instead", key="tab_switch_demucs"):
+                            st.session_state["tab_guitar_engine"] = "guitar_demucs_6s"
+                            st.rerun()
+                    if tab_model == "htdemucs_6s":
+                        if guitar_ft_ok:
+                            if st.checkbox(
+                                "Use cached guitar-ft Demucs weights",
+                                value=False,
+                                key="tab_guitar_ft",
+                                help="Uses verified guitar-ft already in TORCH_HOME. Does not download.",
+                            ):
+                                tab_guitar_checkpoint = "htdemucs_6s_guitar_ft"
+                        elif guitar_ft_bad:
+                            st.caption(
+                                "guitar-ft cache looks corrupt (hash mismatch). "
+                                "Re-enable guitar-ft later to re-download the ~330 MB weights."
+                            )
+                        else:
+                            st.caption(
+                                "guitar-ft weights appear after a one-time ~330 MB download "
+                                "when first used by Demucs guitar-ft."
+                            )
+                    if expert:
+                        if "tab_low_end_restore_db" not in st.session_state:
+                            st.session_state["tab_low_end_restore_db"] = 0.0
+                        if "tab_sub_bass_debleed" not in st.session_state:
+                            st.session_state["tab_sub_bass_debleed"] = False
+                        tab_low_end_restore_db = float(
+                            st.slider(
+                                "Low-end restore (dB)",
+                                min_value=0.0,
+                                max_value=6.0,
+                                step=1.0,
+                                key="tab_low_end_restore_db",
+                                help="Boosts 60–200 Hz on the guitar stem before transcription. 0 = off.",
+                            )
+                        )
+                        tab_sub_bass_debleed = st.checkbox(
+                            "Subtractive bass de-bleed",
+                            key="tab_sub_bass_debleed",
+                            help="Subtracts scaled bass/drum energy below ~150 Hz from the guitar stem.",
+                        )
+                        if tab_low_end_restore_db > 0 and tab_sub_bass_debleed:
+                            st.caption(
+                                "Low-end restore and bass de-bleed both change low frequencies; use one first."
+                            )
+                        tab_bleed_gate = st.checkbox(
+                            "Spectral bleed gate",
+                            key="tab_bleed_gate",
+                            help="Scrubs leftover bass/cymbal flutter when competitor stems dominate.",
+                        )
+                        tab_adaptive_fold_gain = st.checkbox(
+                            "Adaptive fold gain",
+                            key="tab_adaptive_fold_gain",
+                            help="Searches the Other→Guitar mix gain instead of the fixed 0.5.",
+                        )
+                        tab_guitar_ensemble = st.checkbox(
+                            "Cross-model guitar ensemble",
+                            key="tab_guitar_ensemble",
+                            help="Also runs BS-RoFormer-SW and blends guitar stems. Much slower; needs [roformer].",
+                        )
+                        if tab_guitar_ensemble and not roformer_ok:
+                            st.caption("Ensemble needs the [roformer] extra.")
+                if expert:
+                    mix_aware = st.checkbox(
+                        "Mix-aware filtering (stricter note filters)",
+                        key="tab_mix_aware",
+                        help="When stem separation is on, raises onset/frame floors for full mixes.",
                     )
-                    tab_guitar_ensemble = st.checkbox(
-                        "Cross-model guitar ensemble",
-                        key="tab_guitar_ensemble",
-                        help="Also runs BS-RoFormer-SW and blends guitar stems. Much slower; needs [roformer].",
+                    tempo_override = st.number_input(
+                        "Tempo override (BPM, 0 = auto)",
+                        min_value=0.0,
+                        max_value=240.0,
+                        value=0.0,
+                        step=1.0,
+                        key="tab_tempo_override",
                     )
-                    if tab_guitar_ensemble and not roformer_ok:
-                        st.caption("Ensemble needs the [roformer] extra.")
-            if expert:
-                mix_aware = st.checkbox(
-                    "Mix-aware filtering (stricter note filters)",
-                    key="tab_mix_aware",
-                    help="When stem separation is on, raises onset/frame floors for full mixes.",
-                )
-                tempo_override = st.number_input(
-                    "Tempo override (BPM, 0 = auto)",
-                    min_value=0.0,
-                    max_value=240.0,
-                    value=0.0,
-                    step=1.0,
-                    key="tab_tempo_override",
-                )
-                onset_threshold = st.slider(
-                    "Onset threshold", 0.3, 0.9, 0.5, 0.05, key="tab_onset_threshold"
-                )
-                frame_threshold = st.slider(
-                    "Frame threshold", 0.2, 0.8, 0.3, 0.05, key="tab_frame_threshold"
-                )
-            else:
-                mix_aware = bool(st.session_state.get("tab_mix_aware", separate_stems))
+                    onset_threshold = st.slider(
+                        "Onset threshold", 0.3, 0.9, 0.5, 0.05, key="tab_onset_threshold"
+                    )
+                    frame_threshold = st.slider(
+                        "Frame threshold", 0.2, 0.8, 0.3, 0.05, key="tab_frame_threshold"
+                    )
+                else:
+                    mix_aware = bool(st.session_state.get("tab_mix_aware", separate_stems))
 
     with st.container(key="tab_recent"):
         recent_runs = list_recent_runs("tab_pdf")

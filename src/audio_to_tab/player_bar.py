@@ -219,10 +219,25 @@ function fmt(seconds) {{
   const whole = Math.max(0, Math.floor(seconds || 0));
   return Math.floor(whole / 60) + ":" + String(whole % 60).padStart(2, "0");
 }}
-function paint() {{
+function region() {{
+  let start = Number(loopStart.value);
+  let end = Number(loopEnd.value);
+  if (end < start) {{ const swap = start; start = end; end = swap; }}
+  return [start, end];
+}}
+function paint(now) {{
   const ctx = wave.getContext("2d");
   const w = wave.width, h = wave.height;
+  const total = spec.duration || audio.duration || 0;
+  const t = Math.max(0, Number(now) || 0);
   ctx.clearRect(0, 0, w, h);
+  if (loopBox.checked && total > 0) {{
+    const [start, end] = region();
+    if (end > start) {{
+      ctx.fillStyle = "rgba(232, 163, 23, 0.18)";
+      ctx.fillRect((start / total) * w, 0, ((end - start) / total) * w, h);
+    }}
+  }}
   ctx.fillStyle = "#e8a317";
   const peaks = spec.peaks.length ? spec.peaks : [0];
   const bar = w / peaks.length;
@@ -230,8 +245,39 @@ function paint() {{
     const bh = Math.max(1, peak * (h - 8));
     ctx.fillRect(index * bar, (h - bh) / 2, Math.max(1, bar - 1), bh);
   }});
+  if (total > 0) {{
+    const x = (t / total) * w;
+    ctx.fillStyle = "#e8eaef";
+    ctx.fillRect(Math.max(0, x - 1), 0, 2, h);
+  }}
 }}
-paint();
+function tickClock() {{
+  const now = audio.currentTime || 0;
+  const total = audio.duration || spec.duration || 0;
+  time.textContent = fmt(now) + " / " + fmt(total);
+  paint(now);
+  if (loopBox.checked) {{
+    const [start, end] = region();
+    if (end > start && now >= end) audio.currentTime = start;
+  }}
+  if (metro.checked) {{
+    while (clickCursor < spec.clicks.length && spec.clicks[clickCursor] < now - 0.12) clickCursor += 1;
+    if (clickCursor < spec.clicks.length && spec.clicks[clickCursor] <= now) {{
+      blip();
+      clickCursor += 1;
+    }}
+  }}
+}}
+let rafId = 0;
+function pump() {{
+  tickClock();
+  if (!audio.paused && !audio.ended) rafId = requestAnimationFrame(pump);
+  else rafId = 0;
+}}
+function startPump() {{
+  if (!rafId) rafId = requestAnimationFrame(pump);
+}}
+paint(0);
 spec.speeds.forEach((item) => {{
   const button = document.createElement("button");
   button.type = "button";
@@ -248,18 +294,14 @@ play.addEventListener("click", async () => {{
   if (audio.paused) {{
     try {{ await audio.play(); }} catch (err) {{ play.textContent = "Play"; return; }}
     play.textContent = "Pause";
+    startPump();
   }} else {{
     audio.pause();
     play.textContent = "Play";
+    paint(audio.currentTime || 0);
   }}
 }});
 volume.addEventListener("input", () => {{ audio.volume = Number(volume.value); }});
-function region() {{
-  let start = Number(loopStart.value);
-  let end = Number(loopEnd.value);
-  if (end < start) {{ const swap = start; start = end; end = swap; }}
-  return [start, end];
-}}
 let dragFrom = null;
 function xToTime(event) {{
   const rect = wave.getBoundingClientRect();
@@ -276,8 +318,12 @@ wave.addEventListener("mouseup", (event) => {{
   }} else {{
     audio.currentTime = end;
   }}
+  paint(audio.currentTime || end);
   dragFrom = null;
 }});
+loopBox.addEventListener("change", () => paint(audio.currentTime || 0));
+loopStart.addEventListener("input", () => paint(audio.currentTime || 0));
+loopEnd.addEventListener("input", () => paint(audio.currentTime || 0));
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let actx = null;
 let clickCursor = 0;
@@ -291,26 +337,14 @@ function blip() {{
   osc.start();
   osc.stop(actx.currentTime + 0.03);
 }}
-audio.addEventListener("timeupdate", () => {{
-  const now = audio.currentTime || 0;
-  const total = audio.duration || spec.duration || 0;
-  time.textContent = fmt(now) + " / " + fmt(total);
-  if (loopBox.checked) {{
-    const [start, end] = region();
-    if (end > start && now >= end) audio.currentTime = start;
-  }}
-  if (metro.checked) {{
-    while (clickCursor < spec.clicks.length && spec.clicks[clickCursor] < now - 0.12) clickCursor += 1;
-    if (clickCursor < spec.clicks.length && spec.clicks[clickCursor] <= now) {{
-      blip();
-      clickCursor += 1;
-    }}
-  }}
-}});
+audio.addEventListener("timeupdate", () => {{ tickClock(); }});
+audio.addEventListener("play", () => {{ play.textContent = "Pause"; startPump(); }});
+audio.addEventListener("pause", () => {{ play.textContent = "Play"; paint(audio.currentTime || 0); }});
 audio.addEventListener("seeked", () => {{
   clickCursor = spec.clicks.findIndex((tick) => tick >= audio.currentTime);
   if (clickCursor < 0) clickCursor = spec.clicks.length;
+  paint(audio.currentTime || 0);
 }});
-audio.addEventListener("ended", () => {{ play.textContent = "Play"; }});
+audio.addEventListener("ended", () => {{ play.textContent = "Play"; paint(0); }});
 </script>
 """

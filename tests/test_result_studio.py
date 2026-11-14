@@ -11,8 +11,14 @@ from audio_to_tab.chords import chords_from_midi, detect_key, name_chord, placed
 from audio_to_tab.lyrics import lyrics_skip_reason
 from audio_to_tab.notation_view import (
     align_chords_to_lyrics,
+    chord_lyric_block_html,
+    chord_lyric_blocks,
+    chord_row_string,
     measure_rows,
+    piano_roll_playhead_layout,
     piano_roll_svg,
+    score_playhead_html,
+    tab_playhead_layout,
     tab_staff_svg,
 )
 from audio_to_tab.pdf_render import render_structured_tab_pdf
@@ -165,6 +171,66 @@ def test_piano_roll_transpose_moves_pitch_and_shows_measures():
     assert "C4" not in high
 
 
+def test_tab_playhead_layout_matches_staff_geometry():
+    doc = _long_doc()
+    layout = tab_playhead_layout(doc, bars_per_line=4)
+    assert layout["measure_sec"] == pytest.approx(2.0)
+    assert layout["measure_width"] == 180
+    assert layout["row_height"] == 96
+    assert layout["bars_per_line"] == 4
+    assert layout["measure_count"] == 10
+    assert layout["row_count"] == 3
+    assert layout["origin_x"] == 40
+    assert layout["origin_y"] == 28
+    assert layout["note_inset"] == 8
+    assert layout["note_span"] == 152  # measure_width - 28
+
+
+def test_piano_roll_playhead_layout_exposes_scale():
+    notes = [(60, 0.0, 1.0), (64, 3.0, 3.5)]
+    layout = piano_roll_playhead_layout(
+        notes, tempo_bpm=120.0, beats_per_measure=4, semitones=0
+    )
+    assert layout["measure_sec"] == pytest.approx(2.0)
+    assert layout["end_time"] == pytest.approx(3.5)
+    assert layout["origin_x"] == 48
+    assert layout["scale"] > 0
+    assert layout["width"] >= 320
+
+
+def test_score_playhead_html_syncs_to_tab_audio():
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"></svg>'
+    layout = {
+        "mode": "tab",
+        "measure_sec": 2.0,
+        "measure_width": 180,
+        "row_height": 96,
+        "bars_per_line": 4,
+        "measure_count": 4,
+        "row_count": 1,
+        "origin_x": 40,
+        "origin_y": 28,
+        "note_inset": 8,
+        "note_span": 152,
+        "width": 400,
+        "height": 120,
+    }
+    html = score_playhead_html(svg, layout)
+    assert 'id="tab-audio"' in html or "getElementById(\"tab-audio\")" in html
+    assert "requestAnimationFrame" in html
+    assert "score-playhead" in html
+    assert "currentTime" in html
+    assert "studio-score-sync" in html
+
+
+def test_chord_lyric_block_html_includes_data_start():
+    html = chord_lyric_block_html(
+        {"text": "hello", "chords": [{"offset": 0, "name": "C"}], "start": 1.5}
+    )
+    assert 'data-start="1.5"' in html or "data-start='1.5'" in html
+    assert "chord-lyric" in html
+
+
 def test_lyric_line_carries_the_chord_above_it():
     chords = [type("Hit", (), {"start": 1.0, "end": 1.4, "name": "C"})()]
     lines = [type("Line", (), {"start": 0.5, "end": 2.0, "text": "hello"})()]
@@ -174,6 +240,77 @@ def test_lyric_line_carries_the_chord_above_it():
     bare = align_chords_to_lyrics(chords, [])
     assert bare[0]["text"] == ""
     assert bare[0]["chords"] == ["C"]
+
+
+def _hit(start, end, name):
+    return type("Hit", (), {"start": start, "end": end, "name": name})()
+
+
+def _line(start, end, text):
+    return type("Line", (), {"start": start, "end": end, "text": text})()
+
+
+def test_chord_lyric_blocks_offset_at_line_start():
+    chords = [_hit(10.0, 10.4, "C")]
+    lines = [_line(10.0, 13.0, "hello world")]
+    blocks = chord_lyric_blocks(chords, lines)
+    assert blocks[0]["text"] == "hello world"
+    assert blocks[0]["start"] == 10.0
+    assert blocks[0]["chords"] == [{"offset": 0, "name": "C"}]
+
+
+def test_chord_lyric_blocks_offset_mid_line():
+    chords = [_hit(11.5, 11.9, "G")]
+    lines = [_line(10.0, 13.0, "hello world")]
+    blocks = chord_lyric_blocks(chords, lines)
+    assert blocks[0]["chords"] == [{"offset": 6, "name": "G"}]
+
+
+def test_chord_lyric_blocks_keeps_colliding_chords_in_order():
+    chords = [_hit(11.0, 11.2, "C"), _hit(11.4, 11.6, "G"), _hit(12.9, 13.2, "F")]
+    lines = [_line(10.0, 13.0, "hello world")]
+    blocks = chord_lyric_blocks(chords, lines)
+    entries = blocks[0]["chords"]
+    assert [item["name"] for item in entries] == ["C", "G", "F"]
+    assert all(entries[index]["offset"] <= entries[index + 1]["offset"] for index in range(len(entries) - 1))
+    # chord past the line end clamps inside the text, not past it
+    assert entries[-1]["offset"] == len("hello world") - 1
+
+
+def test_chord_lyric_blocks_empty_lines_falls_back_to_chord_timeline():
+    chords = [_hit(1.0, 1.4, "C"), _hit(2.0, 2.4, "G")]
+    blocks = chord_lyric_blocks(chords, [])
+    assert [block["chords"][0]["name"] for block in blocks] == ["C", "G"]
+    assert [block["start"] for block in blocks] == [1.0, 2.0]
+    assert all(block["chords"][0]["offset"] == 0 for block in blocks)
+
+
+def test_chord_row_string_pads_names_to_offsets():
+    chords = [{"offset": 0, "name": "C"}, {"offset": 6, "name": "G"}]
+    assert chord_row_string(chords) == "C     G"
+
+
+def test_chord_row_string_separates_colliding_names():
+    chords = [{"offset": 0, "name": "C"}, {"offset": 0, "name": "G"}]
+    assert chord_row_string(chords) == "C G"
+
+
+def test_chord_lyric_block_html_escapes_lyrics_and_names():
+    block = {
+        "text": "<b>hello</b>",
+        "chords": [{"offset": 0, "name": "C<"}],
+        "start": 10.0,
+    }
+    html = chord_lyric_block_html(block)
+    assert "<b>" not in html
+    assert "&lt;b&gt;" in html
+    assert "C&lt;" in html
+    assert 'class="chord-lyric"' in html
+    assert 'class="chord-row"' in html
+    assert 'class="lyric-row"' in html
+    row = html[html.find('class="chord-row"'):html.find('class="lyric-row"')]
+    lyric = html[html.find('class="lyric-row"'):]
+    assert row.index("C&lt;") < lyric.index("hello")
 
 
 def test_checklist_marks_a_skip_and_ignores_unknown_stages():

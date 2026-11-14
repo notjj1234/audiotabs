@@ -49,7 +49,7 @@ def test_tab_pdf_page_solo_first_safer_duration_and_empty_midi_handling():
     # Standalone app has no Isolation carry-over path.
     assert "carry_over_is_guitar_stem" not in source
     assert "switch_page" not in source
-    # Duration lives in Conversion settings, not Pro-only Advanced duplicate.
+    # Duration lives in Advanced (merged length controls), not a duplicate Pro knob.
     assert 'key="tab_max_duration_sec"' in source
     assert 'Limit duration"' not in source
 
