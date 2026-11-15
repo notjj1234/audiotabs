@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 STAGES: tuple[tuple[str, str], ...] = (
-    ("ingest", "Ingest"),
+    ("ingest", "Loading audio"),
     ("separate", "Separating stems"),
     ("transcribe", "Detecting notes"),
     ("tab", "Mapping tablature"),
@@ -33,7 +33,7 @@ def apply_progress(rows: list[dict[str, str]], stage: str, message: str) -> list
                 row["state"] = "done"
             elif row["state"] == "pending":
                 row["state"] = "skipped"
-                row["detail"] = row["detail"] or "Not reported"
+                row["detail"] = row["detail"] or ""
         return updated
     if stage not in index:
         return updated

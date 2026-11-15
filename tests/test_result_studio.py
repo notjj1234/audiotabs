@@ -10,6 +10,7 @@ import pytest
 from audio_to_tab.chords import chords_from_midi, detect_key, name_chord, placed_note
 from audio_to_tab.lyrics import lyrics_skip_reason
 from audio_to_tab.notation_view import (
+    TAB_ORIGIN_Y,
     align_chords_to_lyrics,
     chord_lyric_block_html,
     chord_lyric_blocks,
@@ -186,6 +187,27 @@ def test_tab_playhead_layout_matches_staff_geometry():
     assert layout["note_span"] == 152  # measure_width - 28
 
 
+def test_tab_staff_fret_numbers_centered_on_string_lines():
+    """Fret digits sit on the string line (central baseline), not in the gap above."""
+    string = 0  # low E → bottom staff line
+    fret = 3
+    doc = TabDocument(
+        events=[
+            TabEvent(
+                start=0.0,
+                notes=[TabNote(start=0.0, end=0.5, string=string, fret=fret, pitch=40)],
+            )
+        ],
+        tempo_bpm=120.0,
+    )
+    svg = tab_staff_svg(doc, bars_per_line=4)
+    expected_y = TAB_ORIGIN_Y + (5 - string) * 12
+    assert 'dominant-baseline="central"' in svg
+    assert f'y="{expected_y}"' in svg
+    assert f'y="{expected_y - 2}"' not in svg
+    assert f">{fret}</text>" in svg
+
+
 def test_piano_roll_playhead_layout_exposes_scale():
     notes = [(60, 0.0, 1.0), (64, 3.0, 3.5)]
     layout = piano_roll_playhead_layout(
@@ -221,6 +243,22 @@ def test_score_playhead_html_syncs_to_tab_audio():
     assert "score-playhead" in html
     assert "currentTime" in html
     assert "studio-score-sync" in html
+    # Regression (blank score): the SVG must ship as a sanitizer-safe data-URI
+    # img with a click layer and per-row markers — never as an inline <svg>.
+    assert "data:image/svg+xml;base64," in html
+    assert "score-click-layer" in html
+    assert 'id="staff-row-0"' in html
+    assert "<svg" not in html
+
+
+def test_piano_roll_score_playhead_has_no_raw_svg():
+    notes = [(60, 0.0, 1.0), (64, 2.0, 2.5)]
+    svg = piano_roll_svg(notes, tempo_bpm=120.0, beats_per_measure=4)
+    layout = piano_roll_playhead_layout(notes, tempo_bpm=120.0, beats_per_measure=4)
+    html = score_playhead_html(svg, layout)
+    assert layout["mode"] == "piano"
+    assert "data:image/svg+xml;base64," in html
+    assert "<svg" not in html
 
 
 def test_chord_lyric_block_html_includes_data_start():
@@ -454,9 +492,9 @@ def test_empty_transcription_writes_no_downloads(tmp_path: Path, monkeypatch):
 
 
 def test_page_keeps_current_guards_and_clears_failed_downloads():
-    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
     source = page.read_text(encoding="utf-8")
-    app = (page.parents[1] / "app.py").read_text(encoding="utf-8")
+    app = (page.parent / "app.py").read_text(encoding="utf-8")
     assert 'layout="wide"' in app
     assert "public YouTube links only" in source
     assert 'key="tab_separate_stems"' in source
@@ -468,7 +506,7 @@ def test_page_keeps_current_guards_and_clears_failed_downloads():
     assert "Chords" in source and "Piano roll" in source
     assert "record_failure" in source
     from audio_to_tab.pipeline import EmptyTranscriptionError
-    from ui.pages.tab_pdf import record_failure
+    from ui.tab_pdf import record_failure
 
     state = {"tab_pdf_artifacts": {"pdf": "old.pdf"}, "tab_pdf_flash": "done"}
     record_failure(state, EmptyTranscriptionError("A cleaner solo-guitar clip is needed."))

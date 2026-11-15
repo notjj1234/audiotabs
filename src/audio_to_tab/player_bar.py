@@ -75,15 +75,16 @@ def player_html(
             "src": f"data:{mime};base64,{audio_b64}" if audio_b64 else "",
             "speeds": [
                 {"rate": speed, "label": label}
-                for speed, label in ((0.25, "0.25"), (0.5, "0.50"), (0.75, "0.75"), (1.0, "1X"))
+                for speed, label in ((0.25, "0.25×"), (0.5, "0.5×"), (0.75, "0.75×"), (1.0, "1×"))
             ],
-        }
+        },
+        ensure_ascii=False,
     )
     song = f'<span class="song">{escape(title)}</span>' if title else ""
     return f"""
 <div id="tab-player" class="studio">
   <div class="wave">
-    <canvas id="tab-wave" width="960" height="72" aria-label="Waveform"></canvas>
+    <canvas id="tab-wave" width="960" height="72" tabindex="0" aria-label="Waveform. Use the arrow keys to seek."></canvas>
     <p class="tip">Drag across the waveform to loop a section.</p>
   </div>
   <div class="transport">
@@ -198,8 +199,13 @@ def player_html(
     cursor: pointer;
     display: block;
   }}
+  #tab-wave:focus-visible {{
+    outline: 2px solid #e8a317;
+    outline-offset: 2px;
+  }}
 </style>
 <script>
+(function () {{
 const spec = {payload};
 const audio = document.getElementById("tab-audio");
 const play = document.getElementById("tab-play");
@@ -227,7 +233,10 @@ function region() {{
 }}
 function paint(now) {{
   const ctx = wave.getContext("2d");
-  const w = wave.width, h = wave.height;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wave.clientWidth || 960;
+  const h = 72;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const total = spec.duration || audio.duration || 0;
   const t = Math.max(0, Number(now) || 0);
   ctx.clearRect(0, 0, w, h);
@@ -277,6 +286,7 @@ function pump() {{
 function startPump() {{
   if (!rafId) rafId = requestAnimationFrame(pump);
 }}
+fitCanvas();
 paint(0);
 spec.speeds.forEach((item) => {{
   const button = document.createElement("button");
@@ -303,6 +313,22 @@ play.addEventListener("click", async () => {{
 }});
 volume.addEventListener("input", () => {{ audio.volume = Number(volume.value); }});
 let dragFrom = null;
+function fitCanvas() {{
+  const dpr = window.devicePixelRatio || 1;
+  wave.width = Math.round((wave.clientWidth || 960) * dpr);
+  wave.height = Math.round(72 * dpr);
+}}
+fitCanvas();
+window.addEventListener("resize", () => {{ fitCanvas(); paint(audio.currentTime || 0); }});
+wave.addEventListener("keydown", (event) => {{
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const step = event.shiftKey ? 5 : 1;
+  const delta = event.key === "ArrowLeft" ? -step : step;
+  const total = spec.duration || audio.duration || 0;
+  audio.currentTime = Math.max(0, Math.min(total, (audio.currentTime || 0) + delta));
+  paint(audio.currentTime || 0);
+}});
 function xToTime(event) {{
   const rect = wave.getBoundingClientRect();
   const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
@@ -346,5 +372,6 @@ audio.addEventListener("seeked", () => {{
   paint(audio.currentTime || 0);
 }});
 audio.addEventListener("ended", () => {{ play.textContent = "Play"; paint(0); }});
+}})();
 </script>
 """

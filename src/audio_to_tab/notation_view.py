@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 from html import escape
@@ -118,13 +119,46 @@ def piano_roll_playhead_layout(
     }
 
 
+def svg_data_img(svg: str, *, alt: str, css_class: str = "studio-score-img") -> str:
+    """Embed SVG as a data-URI img.
+
+    Streamlit's st.html sanitizer (DOMPurify USE_PROFILES html) strips inline
+    <svg>; a data-URI img survives and renders identically.
+    """
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return (
+        f'<img class="{escape(css_class, quote=True)}" '
+        f'alt="{escape(alt, quote=True)}" '
+        f'src="data:image/svg+xml;base64,{encoded}">'
+    )
+
+
 def score_playhead_html(svg: str, layout: dict[str, Any]) -> str:
     """Wrap score SVG with a playhead synced to #tab-audio when present."""
     payload = json.dumps(layout)
     mode = escape(str(layout.get("mode") or "tab"))
+    height = float(layout.get("height") or 1) or 1.0
+    row_count = int(layout.get("row_count") or 0)
+    row_height = float(layout.get("row_height") or 96)
+    origin_y = float(layout.get("origin_y") or 28)
+    markers = ""
+    if mode == "tab" and row_count:
+        tops = []
+        for row in range(row_count):
+            top_pct = (origin_y + row * row_height) / height * 100
+            height_pct = 60.0 / height * 100
+            tops.append(
+                f'<div class="staff-row-marker" id="staff-row-{row}" aria-hidden="true" '
+                f'style="top:{top_pct:.3f}%;height:{height_pct:.3f}%"></div>'
+            )
+        markers = "".join(tops)
+    score_img = svg_data_img(
+        svg,
+        alt="Piano roll" if mode == "piano" else "Guitar tab",
+    )
     return f"""
 <div class="studio-score-sync" data-mode="{mode}">
-  <div class="studio-score-svg" id="studio-score-svg">{svg}</div>
+  <div class="studio-score-svg" id="studio-score-svg">{score_img}<div class="score-click-layer"></div>{markers}</div>
   <div class="score-playhead" id="score-playhead" hidden aria-hidden="true"></div>
 </div>
 <script>
@@ -136,8 +170,9 @@ def score_playhead_html(svg: str, layout: dict[str, Any]) -> str:
   const svgHost = host.querySelector(".studio-score-svg");
   const needle = host.querySelector(".score-playhead");
   if (!svgHost || !needle) return;
-  const svg = svgHost.querySelector("svg");
-  if (!svg) return;
+  const svg = svgHost.querySelector(".studio-score-img");
+  const layer = host.querySelector(".score-click-layer");
+  if (!svg || !layer) return;
 
   function audioEl() {{
     return document.getElementById("tab-audio");
@@ -188,7 +223,7 @@ def score_playhead_html(svg: str, layout: dict[str, Any]) -> str:
     needle.style.top = top + "px";
     needle.style.height = height + "px";
     if (layout.mode === "tab") {{
-      const row = svg.querySelector("#staff-row-" + point.row);
+      const row = host.querySelector("#staff-row-" + point.row);
       if (row && typeof row.scrollIntoView === "function") {{
         const prev = host.dataset.playheadRow;
         if (prev !== String(point.row)) {{
@@ -259,8 +294,7 @@ def score_playhead_html(svg: str, layout: dict[str, Any]) -> str:
     place(audio.currentTime);
   }}
 
-  svg.style.cursor = "pointer";
-  svg.addEventListener("click", seekFromEvent);
+  layer.addEventListener("click", seekFromEvent);
   bind();
   setTimeout(bind, 50);
   setTimeout(bind, 250);
@@ -269,6 +303,25 @@ def score_playhead_html(svg: str, layout: dict[str, Any]) -> str:
 <style>
 .studio-score-sync {{
   position: relative;
+}}
+.studio-score-sync .studio-score-svg {{
+  position: relative;
+}}
+.studio-score-sync .studio-score-img {{
+  display: block;
+  width: 100%;
+}}
+.studio-score-sync .score-click-layer {{
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  z-index: 3;
+}}
+.studio-score-sync .staff-row-marker {{
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
 }}
 .studio-score-sync .score-playhead {{
   position: absolute;
@@ -329,8 +382,9 @@ def tab_staff_svg(
                 for note in event.notes:
                     y_note = top + (5 - note.string) * 12
                     parts.append(
-                        f'<text x="{x_note:.1f}" y="{y_note - 2}" font-size="12" '
-                        f'font-weight="700" fill="{ink}">{int(note.fret)}</text>'
+                        f'<text x="{x_note:.1f}" y="{y_note}" font-size="12" '
+                        f'dominant-baseline="central" font-weight="700" fill="{ink}">'
+                        f"{int(note.fret)}</text>"
                     )
             parts.append(
                 f'<text x="{x}" y="{top + 78}" font-size="11" fill="{ink}">{measure_index + 1}</text>'

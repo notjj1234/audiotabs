@@ -75,14 +75,50 @@ def progress_card_html(rows: list[dict[str, str]]) -> str:
 """
 
 
-def result_header_html(title: str, *, key: str, tempo: str, duration: str) -> str:
+def result_header_html(
+    title: str,
+    *,
+    key: str,
+    tempo: str,
+    duration: str,
+    confidence: str | None = None,
+    notes: str | None = None,
+    technical: str | None = None,
+) -> str:
+    key_span = f"<span>Key <strong>{escape(key)}</strong></span>" if key else ""
+    confidence_span = (
+        f"<span>Confidence <strong>{escape(confidence)}</strong></span>" if confidence else ""
+    )
+    notes_html = f'<p class="studio-result-notes">{escape(notes)}</p>' if notes else ""
+    technical_html = (
+        f'<p class="studio-result-technical">{escape(technical)}</p>' if technical else ""
+    )
     return f"""
 <div class="studio-result-header">
   <h2>{escape(title)}</h2>
   <div class="studio-result-meta">
-    <span>Key <strong>{escape(key)}</strong></span>
+    {key_span}
     <span>Tempo <strong>{escape(tempo)}</strong></span>
     <span>Duration <strong>{escape(duration)}</strong></span>
+    {confidence_span}
   </div>
+  {notes_html}
+  {technical_html}
+</div>
+"""
+
+
+def recent_conversions_heading_html() -> str:
+    return """
+<div class="studio-recent-heading">
+  <h3>Recent conversions</h3>
+</div>
+"""
+
+
+def advanced_panel_heading_html() -> str:
+    return """
+<div class="studio-advanced-heading">
+  <h3>Advanced</h3>
 </div>
 """

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from ui.common import app_icon_png, app_version, ensure_src_path
+from ui.common import app_icon_png, ensure_src_path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SRC = _REPO_ROOT / "src"
@@ -20,12 +20,12 @@ ensure_src_path()
 
 _ICON = app_icon_png()
 st.set_page_config(
-    page_title=f"Tab PDF · Studio {app_version()}",
+    page_title="Tab PDF",
     page_icon=str(_ICON) if _ICON.is_file() else None,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-from ui.pages.tab_pdf import main as tab_pdf_main  # noqa: E402
+from ui.tab_pdf import main as tab_pdf_main  # noqa: E402
 
 tab_pdf_main()

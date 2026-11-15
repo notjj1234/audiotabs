@@ -38,7 +38,7 @@ def test_ui_effective_separate_when_demucs_missing():
 
 
 def test_tab_pdf_page_solo_first_safer_duration_and_empty_midi_handling():
-    page = Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py"
+    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
     source = page.read_text(encoding="utf-8")
     assert 'key="tab_separate_stems"' in source
     assert 'st.session_state["tab_separate_stems"] = False' in source

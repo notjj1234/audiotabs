@@ -21,7 +21,7 @@ APP = REPO_ROOT / "ui" / "app.py"
 PORTS = tuple(range(8501, 8511))
 WINDOW_SIZE = (1280, 860)
 WINDOW_MIN_SIZE = (960, 640)
-WINDOW_TITLE = "Audio to Tab"
+WINDOW_TITLE = "Tab PDF"
 HEALTH_TIMEOUT_SEC = 180.0
 HEALTH_POLL_SEC = 0.3
 
@@ -42,20 +42,37 @@ def log(message: str) -> None:
 
 
 def port_free(port: int) -> bool:
+    """Return False when something already accepts connections on 127.0.0.1:port.
+
+    A bind()+SO_REUSEADDR probe is wrong on Windows: it can succeed while an
+    older Streamlit is still listening, so the desktop window opens the stale
+    server (cached imports / missing symbols) instead of the one we just started.
+
+    Connect is the reliable signal: immediate accept => busy. Refused or a
+    localhost timeout (common on some Windows stacks for closed ports) => free.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(0.35)
         try:
-            sock.bind(("127.0.0.1", port))
+            sock.connect(("127.0.0.1", port))
         except OSError:
-            return False
-    return True
+            return True
+    return False
 
 
 def pick_port() -> int:
+    busy: list[int] = []
     for port in PORTS:
         if port_free(port):
+            if busy:
+                log(f"Skipping in-use port(s) {busy}; using {port}")
             return port
-    raise RuntimeError(f"No free port in {PORTS[0]}-{PORTS[-1]}")
+        busy.append(port)
+    raise RuntimeError(
+        f"No free port in {PORTS[0]}-{PORTS[-1]} "
+        f"(already accepting connections: {busy}). "
+        "Close the other Tab PDF / Streamlit window and try again."
+    )
 
 
 def health_ok(port: int) -> bool:

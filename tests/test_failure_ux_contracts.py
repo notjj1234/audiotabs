@@ -9,7 +9,7 @@ from audio_to_tab.separate import GUITAR_FT_CACHE_HINT
 
 
 def _tab_pdf_source() -> str:
-    return (Path(__file__).resolve().parents[1] / "ui" / "pages" / "tab_pdf.py").read_text(
+    return (Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py").read_text(
         encoding="utf-8"
     )
 
