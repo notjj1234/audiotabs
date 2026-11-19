@@ -27,8 +27,14 @@ audio-separator 0.48.0), and this checkpoint is not in that registry.
 
 from __future__ import annotations
 
+import json
 import logging
+import math
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+import numpy as np
+import soundfile as sf
 
 from audio_to_tab import roformer
 
@@ -104,3 +110,271 @@ def load_mbr_lead_rhythm_config(yaml_path: Path) -> dict:
 def is_lead_rhythm_split_available() -> bool:
     """True when the installed bs_roformer runtime supports MelBand configs."""
     return roformer._is_bs_melband_available()
+
+
+# ---------------------------------------------------------------------------
+# Split diagnostics
+# ---------------------------------------------------------------------------
+
+ENVELOPE_WIN_SEC = 0.05
+NEAR_SILENT_DBFS = -60.0
+CORRELATION_WARN = 0.85
+MIN_INPUT_SEC = 5.0
+CLIP_SAMPLE_THRESHOLD = 0.99
+CLIP_FRACTION_MIN = 1e-4
+SILENCE_FRAME_DBFS = -60.0
+
+# BS.1770 K-weighting, standard (48 kHz) coefficients — an approximation at
+# other rates, documented as such in integrated_loudness_lufs.
+_K_SHELF_B = (1.53512485958697, -2.69169618940638, 1.19839281085285)
+_K_SHELF_A = (1.0, -1.69065929318241, 0.73248077421585)
+_K_HP_B = (1.0, -2.0, 1.0)
+_K_HP_A = (1.0, -1.99004745483398, 0.99007225036621)
+
+
+def _to_mono(data: np.ndarray) -> np.ndarray:
+    return data.mean(axis=1) if data.ndim == 2 else data
+
+
+def _frame_rms_db(mono: np.ndarray, sr: int, win_sec: float) -> np.ndarray:
+    win = max(1, int(sr * win_sec))
+    n_frames = max(0, len(mono) // win)
+    if n_frames == 0:
+        return np.array([], dtype=np.float64)
+    frames = mono[: n_frames * win].reshape(n_frames, win)
+    rms = np.sqrt(np.mean(frames * frames, axis=1))
+    return 20.0 * np.log10(np.maximum(rms, 1e-10))
+
+
+def _spectral_centroid_hz(mono: np.ndarray, sr: int) -> float:
+    if mono.size == 0 or float(np.max(np.abs(mono))) == 0.0:
+        return 0.0
+    spec = np.abs(np.fft.rfft(mono * np.hanning(mono.size)))
+    freqs = np.fft.rfftfreq(mono.size, d=1.0 / sr)
+    total = float(spec.sum())
+    return float((spec * freqs).sum() / total) if total > 0 else 0.0
+
+
+def integrated_loudness_lufs(mono: np.ndarray, sr: int) -> float:
+    """BS.1770-style gated integrated loudness (approximation, documented).
+
+    Method: mono downmix → K-weighting (Stage-1 high-shelf + Stage-2 high-pass
+    biquads, standard 48 kHz coefficients applied at any rate) → 400 ms blocks
+    with 75 % overlap → block loudness ``-0.691 + 10*log10(mean square)`` →
+    absolute gate at -70 LUFS, then relative gate at (gated mean - 10 LU).
+    This is a numpy/scipy implementation of the BS.1770 procedure, not an
+    ITU-certified measurement.
+    """
+    from scipy.signal import lfilter
+
+    x = np.asarray(mono, dtype=np.float64)
+    if x.size == 0:
+        return -70.0
+    x = lfilter(_K_SHELF_B, _K_SHELF_A, x)
+    x = lfilter(_K_HP_B, _K_HP_A, x)
+
+    block = int(0.400 * sr)
+    hop = int(0.100 * sr)
+    if x.size < block:
+        blocks = [x]
+    else:
+        starts = range(0, x.size - block + 1, hop)
+        blocks = [x[s : s + block] for s in starts]
+    energies = np.array([float(np.mean(b * b)) for b in blocks], dtype=np.float64)
+    with np.errstate(divide="ignore"):
+        loudness = -0.691 + 10.0 * np.log10(np.maximum(energies, 1e-20))
+
+    kept = energies[loudness > -70.0]
+    if kept.size == 0:
+        return -70.0
+    relative_gate = -0.691 + 10.0 * math.log10(max(float(np.mean(kept)), 1e-20)) - 10.0
+    kept = energies[(loudness > -70.0) & (loudness > relative_gate)]
+    if kept.size == 0:
+        return -70.0
+    return float(-0.691 + 10.0 * math.log10(max(float(np.mean(kept)), 1e-20)))
+
+
+def pearson_rms_correlation(
+    lead: np.ndarray, rhythm: np.ndarray, sr: int
+) -> float | None:
+    """Pearson r of the two stems' 50 ms RMS envelopes. None if too short."""
+    a = _frame_rms_db(_to_mono(np.asarray(lead, dtype=np.float64)), sr, ENVELOPE_WIN_SEC)
+    b = _frame_rms_db(_to_mono(np.asarray(rhythm, dtype=np.float64)), sr, ENVELOPE_WIN_SEC)
+    n = min(a.size, b.size)
+    if n < 2:
+        return None
+    a, b = a[:n], b[:n]
+    sa, sb = float(a.std()), float(b.std())
+    if sa == 0.0 and sb == 0.0:
+        # Degenerate flat envelopes (e.g. steady test tones): equal loudness
+        # tracks perfectly, different loudness does not co-vary at all.
+        return 1.0 if abs(float(a[0]) - float(b[0])) < 1e-6 else 0.0
+    if sa == 0.0 or sb == 0.0:
+        return 0.0
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+@dataclass
+class StemAudioStats:
+    rms_dbfs: float
+    peak: float
+    spectral_centroid_hz: float
+    silence_ratio: float
+    integrated_loudness_lufs: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class LeadRhythmSplitDiagnostics:
+    """Diagnostics for a lead/rhythm model split (warn-only, never blocks)."""
+
+    attempted: bool
+    reason: str
+    model_sample_rate: int = 44100
+    input_sample_rate: int | None = None
+    input_channels: int | None = None
+    resampled: bool = False
+    input_duration_sec: float | None = None
+    lead: StemAudioStats | None = None
+    rhythm: StemAudioStats | None = None
+    envelope_correlation: float | None = None
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "attempted": self.attempted,
+            "reason": self.reason,
+            "model_sample_rate": self.model_sample_rate,
+            "input_sample_rate": self.input_sample_rate,
+            "input_channels": self.input_channels,
+            "resampled": self.resampled,
+            "input_duration_sec": self.input_duration_sec,
+            "lead": self.lead.to_dict() if self.lead else None,
+            "rhythm": self.rhythm.to_dict() if self.rhythm else None,
+            "envelope_correlation": self.envelope_correlation,
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LeadRhythmSplitDiagnostics":
+        def stats(raw: dict | None) -> StemAudioStats | None:
+            return StemAudioStats(**raw) if isinstance(raw, dict) else None
+
+        return cls(
+            attempted=bool(data.get("attempted")),
+            reason=str(data.get("reason") or ""),
+            model_sample_rate=int(data.get("model_sample_rate") or 44100),
+            input_sample_rate=data.get("input_sample_rate"),
+            input_channels=data.get("input_channels"),
+            resampled=bool(data.get("resampled")),
+            input_duration_sec=data.get("input_duration_sec"),
+            lead=stats(data.get("lead")),
+            rhythm=stats(data.get("rhythm")),
+            envelope_correlation=data.get("envelope_correlation"),
+            warnings=[str(w) for w in (data.get("warnings") or [])],
+        )
+
+    def write_json(self, path: Path) -> Path:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        return path
+
+
+def _stem_stats(path: Path, sr: int) -> StemAudioStats:
+    data, _ = sf.read(str(path), always_2d=True)
+    mono = _to_mono(data.astype(np.float64))
+    rms = float(np.sqrt(np.mean(mono * mono))) if mono.size else 0.0
+    peak = float(np.max(np.abs(data))) if data.size else 0.0
+    frame_db = _frame_rms_db(mono, sr, ENVELOPE_WIN_SEC)
+    silence_ratio = (
+        float(np.mean(frame_db < SILENCE_FRAME_DBFS)) if frame_db.size else 1.0
+    )
+    return StemAudioStats(
+        rms_dbfs=20.0 * math.log10(max(rms, 1e-10)),
+        peak=peak,
+        spectral_centroid_hz=_spectral_centroid_hz(mono, sr),
+        silence_ratio=silence_ratio,
+        integrated_loudness_lufs=integrated_loudness_lufs(mono, sr),
+    )
+
+
+def _input_info(path: Path) -> tuple[int, int, float, float]:
+    """(channels, sample_rate, duration_sec, clipped_fraction)."""
+    data, sr = sf.read(str(path), always_2d=True)
+    duration = float(data.shape[0]) / float(sr) if sr else 0.0
+    clipped = 0.0
+    if data.size:
+        clipped = float(np.mean(np.abs(data) > CLIP_SAMPLE_THRESHOLD))
+    return int(data.shape[1]), int(sr), duration, clipped
+
+
+def analyze_lead_rhythm_stems(
+    lead_path: Path,
+    rhythm_path: Path,
+    *,
+    input_path: Path | None = None,
+    model_sample_rate: int = 44100,
+    resampled: bool = False,
+) -> LeadRhythmSplitDiagnostics:
+    """Per-stem stats + pair correlation + warn-only input quality flags."""
+    lead_path, rhythm_path = Path(lead_path), Path(rhythm_path)
+    lead_data, lead_sr = sf.read(str(lead_path), always_2d=True)
+    rhythm_data, rhythm_sr = sf.read(str(rhythm_path), always_2d=True)
+
+    warnings: list[str] = []
+    diag = LeadRhythmSplitDiagnostics(
+        attempted=True,
+        reason="model split completed",
+        model_sample_rate=model_sample_rate,
+        resampled=resampled,
+    )
+
+    diag.lead = _stem_stats(lead_path, lead_sr)
+    diag.rhythm = _stem_stats(rhythm_path, rhythm_sr)
+    if diag.lead.rms_dbfs < NEAR_SILENT_DBFS:
+        warnings.append(
+            f"Lead stem is near-silent ({diag.lead.rms_dbfs:.1f} dBFS "
+            f"< {NEAR_SILENT_DBFS} dBFS)."
+        )
+    if diag.rhythm.rms_dbfs < NEAR_SILENT_DBFS:
+        warnings.append(
+            f"Rhythm stem is near-silent ({diag.rhythm.rms_dbfs:.1f} dBFS "
+            f"< {NEAR_SILENT_DBFS} dBFS)."
+        )
+
+    corr = pearson_rms_correlation(
+        _to_mono(lead_data.astype(np.float64)),
+        _to_mono(rhythm_data.astype(np.float64)),
+        lead_sr,
+    )
+    diag.envelope_correlation = corr
+    if corr is not None and corr > CORRELATION_WARN:
+        warnings.append(
+            f"Lead/rhythm envelope correlation is high (r={corr:.2f} > "
+            f"{CORRELATION_WARN}); the split may not be separable on this input."
+        )
+
+    probe = Path(input_path) if input_path is not None else lead_path
+    try:
+        channels, in_sr, duration, clipped_frac = _input_info(probe)
+    except Exception:
+        channels, in_sr, duration, clipped_frac = (None, None, None, 0.0)  # type: ignore[assignment]
+    diag.input_channels = channels
+    diag.input_sample_rate = in_sr
+    diag.input_duration_sec = duration
+    if clipped_frac > CLIP_FRACTION_MIN:
+        warnings.append(
+            f"Input appears clipped ({clipped_frac:.2%} of samples near full scale)."
+        )
+    if channels == 1:
+        warnings.append("Input is mono; stereo panning cues are unavailable to the split.")
+    if duration is not None and duration < MIN_INPUT_SEC:
+        warnings.append(
+            f"Input is very short ({duration:.1f}s < {MIN_INPUT_SEC:.0f}s); split stats are unreliable."
+        )
+
+    diag.warnings = warnings
+    return diag
