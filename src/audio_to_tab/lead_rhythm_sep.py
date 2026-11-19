@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -378,3 +379,89 @@ def analyze_lead_rhythm_stems(
 
     diag.warnings = warnings
     return diag
+
+
+# ---------------------------------------------------------------------------
+# Split runner
+# ---------------------------------------------------------------------------
+
+
+def run_lead_rhythm_split(
+    guitar_path: Path,
+    output_dir: Path,
+    *,
+    device: str = "cpu",
+    on_progress: Callable[[str, float], None] | None = None,
+) -> tuple[dict[str, Path], LeadRhythmSplitDiagnostics]:
+    """Split an isolated guitar stem into lead_guitar / rhythm_guitar WAVs.
+
+    Lead comes from the model (``target_instrument: Lead``); Rhythm is the
+    mixture residual. Sample rate, chunk size, and overlap are read from the
+    model YAML — never hardcoded. Fails loudly; there is no fallback to a
+    combined guitar stem inside this mode.
+    """
+    if not is_lead_rhythm_split_available():
+        raise RuntimeError(f"Lead/rhythm split is not available. {INSTALL_HINT}")
+
+    def _prog(message: str, fraction: float) -> None:
+        if on_progress is not None:
+            on_progress(message, fraction)
+
+    guitar_path = Path(guitar_path)
+    output_dir = Path(output_dir)
+    roformer._refuse_long_roformer_audio(guitar_path)
+
+    _prog("Preparing lead/rhythm model", 0.10)
+    ckpt_path, yaml_path = download_mbr_lead_rhythm_weights()
+    config = load_mbr_lead_rhythm_config(yaml_path)
+    audio_cfg = config.get("audio") or {}
+    infer_cfg = config.get("inference") or {}
+    model_sr = int(audio_cfg["sample_rate"])
+    chunk_size = int(audio_cfg.get("chunk_size") or 132300)
+    n_overlap = int(infer_cfg.get("num_overlap") or 2)
+
+    try:
+        info = sf.info(str(guitar_path))
+        input_sr = int(info.samplerate)
+        input_channels = int(info.channels)
+        input_duration = float(info.duration)
+    except Exception:
+        input_sr = input_channels = input_duration = None  # type: ignore[assignment]
+    resampled = bool(input_sr is not None and input_sr != model_sr)
+
+    try:
+        _prog("Splitting lead and rhythm guitars", 0.35)
+        mix = roformer._load_audio_stereo(guitar_path, model_sr)
+        dev = roformer._torch_device(device)
+        roformer._cap_cpu_threads(device)
+        model = roformer._instantiate_bs_roformer_model(config, ckpt_path, dev)
+        sources = roformer._demix_track(
+            model,
+            mix,
+            device=dev,
+            chunk_size=chunk_size,
+            n_overlap=n_overlap,
+            num_stems=1,
+        )
+        lead = sources[0]
+        rhythm = mix - lead
+        _prog("Writing lead and rhythm stems", 0.85)
+        artifacts = roformer._write_stems(
+            [lead, rhythm], list(LEAD_RHYTHM_STEM_NAMES), output_dir, model_sr
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Lead/rhythm split failed: {exc}") from exc
+
+    missing = [name for name in LEAD_RHYTHM_STEM_NAMES if name not in artifacts]
+    if missing:
+        raise RuntimeError(f"Lead/rhythm split failed: missing stems {missing}")
+
+    diag = analyze_lead_rhythm_stems(
+        artifacts["lead_guitar"],
+        artifacts["rhythm_guitar"],
+        input_path=guitar_path,
+        model_sample_rate=model_sr,
+        resampled=resampled,
+    )
+    _prog("Lead/rhythm split complete", 0.99)
+    return artifacts, diag
