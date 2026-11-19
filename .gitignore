@@ -13,6 +13,9 @@ output/
 # OS
 .DS_Store
 
+# Node (build-time only)
+node_modules/
+
 # Models / large artifacts
 *.wav
 *.pt

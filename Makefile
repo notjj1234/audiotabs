@@ -9,6 +9,15 @@ help:
 install:
 	python -m pip install -e ".[dev,demucs]"
 
+ui-build:
+	cd app/web && npm ci && npm run build
+
+dev-api:
+	PYTHONPATH=src:. python -m app.server --port 8533
+
+dev-web:
+	cd app/web && npm run dev
+
 ui:
 	PYTHONPATH=src:. streamlit run ui/app.py
 
