@@ -64,6 +64,7 @@ import numpy as np
 from audio_to_tab.hardware import ensure_cuda_available, separate_progress_message
 from audio_to_tab.ingest import normalize_audio
 from audio_to_tab.lead_rhythm import LeadRhythmThresholds, resolve_lead_rhythm_mode
+from audio_to_tab.lead_rhythm_sep import LEAD_RHYTHM_SPLIT_ID
 from audio_to_tab.mixer import apply_true_peak_ceiling, mix_stems_to_wav
 from audio_to_tab.roformer import (
     BS_ROFORMER_SW_ID,
@@ -115,7 +116,7 @@ def _mark_stage_complete(stage: str, on_stage_complete: StageCompleteCallback | 
         on_stage_complete(stage)
 
 DEMUCS_MODELS = ("htdemucs_6s", "htdemucs", "htdemucs_ft")
-SUPPORTED_MODELS = DEMUCS_MODELS + ROFORMER_MODELS + SCNET_MODELS
+SUPPORTED_MODELS = DEMUCS_MODELS + ROFORMER_MODELS + SCNET_MODELS + (LEAD_RHYTHM_SPLIT_ID,)
 # Models that emit a dedicated guitar stem (quality floor, refine, fold).
 GUITAR_PRODUCING_MODELS = frozenset(
     {"htdemucs_6s", BS_ROFORMER_SW_ID, MELBAND_GUITAR_ID}
@@ -861,6 +862,9 @@ class IsolateConfig:
     # Opt-in: True → run Lead/Rhythm post-process (eval/CLI). Default isolate = False.
     lead_rhythm: bool = False
     dual_guitar: bool = False  # deprecated alias for lead_rhythm
+    # Only meaningful with model="lead_rhythm_split": run the guitar-ft
+    # pre-pass first. False = the input is already an isolated guitar file.
+    lead_rhythm_pre_pass: bool = True
     # Optional stage-1 guitar checkpoint (htdemucs_6s only). None = stock Demucs.
     guitar_checkpoint: str | None = None
     # Optional Lead/Rhythm gate overrides (CLI/eval); None → env + defaults.
@@ -2266,6 +2270,119 @@ def _maybe_refine_guitar(
         progress("guitar_refine", "Guitar refinement failed. Using first-pass stem")
 
 
+def _run_lead_rhythm_split_isolation(
+    cfg: IsolateConfig,
+    src: Path,
+    out_dir: Path,
+    progress: ProgressCallback,
+) -> dict[str, Path]:
+    """Lead/rhythm split mode: guitar-ft pre-pass (unless input is already a
+    guitar stem) → Mel-Band RoFormer Lead/Rhythm split → stems + diagnostics.
+
+    No Demucs post-processing (fold/refine/bleed-gate) applies: the split
+    model consumes a single guitar stem. Fails loudly; no fallback.
+    """
+    from audio_to_tab import lead_rhythm_sep
+    from audio_to_tab.separate import separate_guitar_stem
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    guitar_stem = out_dir / "guitar_stem.wav"
+    if cfg.lead_rhythm_pre_pass:
+        progress("separate", "Isolating guitar stem with guitar-ft Demucs")
+        checkpoint = cfg.guitar_checkpoint or GUITAR_FT_CHECKPOINT_ID
+        separate_guitar_stem(
+            src,
+            guitar_stem,
+            model="htdemucs_6s",
+            device=cfg.device,
+            quality=cfg.quality,
+            demucs_segment=cfg.demucs_segment,
+            demucs_jobs=cfg.demucs_jobs,
+            guitar_checkpoint=checkpoint,
+            on_progress=lambda message, fraction: progress("separate", message),
+        )
+    else:
+        progress("separate", "skipped: input is already an isolated guitar stem")
+        shutil.copy2(src, guitar_stem)
+
+    progress("guitar_split", "Splitting lead and rhythm guitars")
+    split_dir = out_dir / "_lead_rhythm_split"
+    stems, diag = lead_rhythm_sep.run_lead_rhythm_split(
+        guitar_stem,
+        split_dir,
+        device=cfg.device,
+        on_progress=lambda message, fraction: progress("guitar_split", message),
+    )
+    lead_path = out_dir / "lead_guitar.wav"
+    rhythm_path = out_dir / "rhythm_guitar.wav"
+    shutil.copy2(stems["lead_guitar"], lead_path)
+    shutil.copy2(stems["rhythm_guitar"], rhythm_path)
+    shutil.rmtree(split_dir, ignore_errors=True)
+    diag_path = diag.write_json(out_dir / "lead_rhythm_split_diagnostics.json")
+
+    artifacts: dict[str, Path] = {
+        "guitar": guitar_stem,
+        "lead_guitar": lead_path,
+        "rhythm_guitar": rhythm_path,
+        "lead_rhythm_split_diagnostics": diag_path,
+    }
+
+    progress("presence", "Finishing")
+    stem_wav_paths = {
+        name: path for name, path in artifacts.items() if path.suffix.lower() == ".wav"
+    }
+    presence = detect_present_stems(stem_wav_paths)
+    if "guitar" in presence and "lead_guitar" in presence and "rhythm_guitar" in presence:
+        guitar_presence = presence["guitar"]
+        presence["guitar"] = StemPresence(
+            present=False,
+            confidence=guitar_presence.confidence,
+            mean_dbfs=guitar_presence.mean_dbfs,
+            energy_share=guitar_presence.energy_share,
+            reason="superseded by lead_guitar/rhythm_guitar",
+        )
+        for derived in ("lead_guitar", "rhythm_guitar"):
+            sp = presence[derived]
+            presence[derived] = StemPresence(
+                present=True,
+                confidence=max(sp.confidence, 0.6),
+                mean_dbfs=sp.mean_dbfs,
+                energy_share=sp.energy_share,
+                reason="Lead/Rhythm split emitted by the model splitter",
+            )
+    presence_path = out_dir / "stem_presence.json"
+    presence_path.write_text(
+        json.dumps({name: sp.to_dict() for name, sp in presence.items()}, indent=2),
+        encoding="utf-8",
+    )
+    artifacts["stem_presence_diagnostics"] = presence_path
+
+    if cfg.emit_metronome:
+        from audio_to_tab.metronome import (
+            attach_metronome_artifact,
+            coerce_metronome_render_options,
+        )
+
+        fallback = guitar_stem if guitar_stem.is_file() else src
+        try:
+            attach_metronome_artifact(
+                artifacts,
+                out_dir,
+                fallback=fallback,
+                render=coerce_metronome_render_options(
+                    accent=cfg.metronome_accent,
+                    rate=cfg.metronome_rate,
+                    sound=cfg.metronome_sound,
+                ),
+            )
+        except Exception:
+            logger.debug("metronome stem skipped", exc_info=True)
+
+    attach_guitar_refine_backups(artifacts)
+    progress("done", "Finish")
+    return artifacts
+
+
 def separate_stems(
     audio_path: str | Path,
     output_dir: str | Path,
@@ -2306,6 +2423,11 @@ def separate_stems(
     if cfg.model in SCNET_MODELS and not is_scnet_available():
         raise RuntimeError(
             f"SCNet backend is not installed. {SCNET_INSTALL_HINT}"
+        )
+
+    if cfg.model == LEAD_RHYTHM_SPLIT_ID:
+        return _run_lead_rhythm_split_isolation(
+            cfg, Path(audio_path), Path(output_dir), on_progress or _noop_progress
         )
 
     ensure_cuda_available(cfg.device)
