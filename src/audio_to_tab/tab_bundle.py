@@ -24,11 +24,21 @@ from audio_to_tab.tab_generate import TabDocument, midi_to_tab, tab_to_ascii
 from audio_to_tab.tuning import tuning_preset
 
 DOWNLOAD_SPECS = (
-    ("pdf", "PDF", "application/pdf"),
-    ("midi", "MIDI", "audio/midi"),
-    ("tab", "ASCII tab", "text/plain"),
-    ("gp5", "Guitar Pro 5", "application/x-guitar-pro"),
-    ("guitar_stem", "Guitar stem", "audio/wav"),
+    ("pdf", "PDF", "application/pdf", "Printable chart"),
+    ("midi", "MIDI", "audio/midi", "For DAWs"),
+    ("tab", "ASCII tab", "text/plain", "Plain text for editors"),
+    ("gp5", "Guitar Pro 5", "application/x-guitar-pro", "For Guitar Pro"),
+    ("guitar_stem", "Guitar stem", "audio/wav", "Isolated guitar audio"),
+    ("musicxml", "MusicXML", "application/vnd.recordare.musicxml+xml", "For MuseScore / Dorico"),
+    ("stems_midi", "Stems MIDI", "audio/midi", "Lead + rhythm tracks"),
+    ("lead_midi", "Lead MIDI", "audio/midi", "Lead track only"),
+    ("rhythm_midi", "Rhythm MIDI", "audio/midi", "Rhythm track only"),
+    ("lead_tab", "Lead tab", "text/plain", "ASCII tab, lead only"),
+    ("rhythm_tab", "Rhythm tab", "text/plain", "ASCII tab, rhythm only"),
+    ("lead_pdf", "Lead PDF", "application/pdf", "Printable lead chart"),
+    ("rhythm_pdf", "Rhythm PDF", "application/pdf", "Printable rhythm chart"),
+    ("lead_guitar", "Lead guitar stem", "audio/wav", "Isolated lead guitar"),
+    ("rhythm_guitar", "Rhythm guitar stem", "audio/wav", "Isolated rhythm guitar"),
 )
 
 
@@ -53,13 +63,21 @@ def download_menu(artifacts: dict | None) -> list[dict]:
     if not artifacts:
         return []
     items: list[dict] = []
-    for key, label, mime in DOWNLOAD_SPECS:
+    for key, label, mime, subtitle in DOWNLOAD_SPECS:
         raw = artifacts.get(key)
         if not raw:
             continue
         path = Path(str(raw))
         if path.is_file():
-            items.append({"key": key, "label": label, "path": path, "mime": mime})
+            items.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "path": path,
+                    "mime": mime,
+                    "subtitle": subtitle,
+                }
+            )
     return items
 
 

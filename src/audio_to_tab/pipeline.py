@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import tempfile
@@ -9,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from audio_to_tab import lead_rhythm_sep, lead_rhythm_tab, musicxml_export
 from audio_to_tab.ingest import download_youtube_audio, normalize_audio
 from audio_to_tab.isolate import analyze_guitar_stem_quality
 from audio_to_tab.lyrics import lyrics_skip_reason, transcribe_lyrics
@@ -18,7 +20,7 @@ from audio_to_tab.midi_cleanup import (
     mix_aware_cleanup_config,
     solo_guitar_cleanup_config,
 )
-from audio_to_tab.separate import separate_guitar_stem
+from audio_to_tab.separate import GUITAR_FT_CHECKPOINT_ID, separate_guitar_stem
 from audio_to_tab.tab_bundle import (
     audio_duration_seconds,
     bundle_chords,
@@ -91,8 +93,14 @@ class PipelineConfig:
     auto_meter: bool = True
     fingering_preference: str = "playable"
     export_gp5: bool = False
+    # Opt-in lead/rhythm mode: guitar-ft pre-pass (or already-isolated input)
+    # → Mel-Band RoFormer Lead/Rhythm split → per-stem transcription + tabs.
+    # Also set when ``model == "lead_rhythm_split"``.
+    lead_rhythm_split: bool = False
 
     def __post_init__(self) -> None:
+        if self.model == lead_rhythm_sep.LEAD_RHYTHM_SPLIT_ID:
+            self.lead_rhythm_split = True
         if self.demucs_quality not in ("fast", "balanced", "best"):
             raise ValueError(f"Invalid demucs_quality: {self.demucs_quality!r}")
         if self.beats_per_measure <= 0:
@@ -119,10 +127,10 @@ class PipelineConfig:
             raise ValueError(f"bars_per_line must be 1..8, got {self.bars_per_line}")
 
 
-ProgressCallback = Callable[[str, str], None]  # stage, message
+ProgressCallback = Callable[..., None]  # stage, message, optional fraction
 
 
-def _noop_progress(stage: str, message: str) -> None:
+def _noop_progress(stage: str, message: str, fraction: float | None = None) -> None:
     pass
 
 
@@ -260,9 +268,44 @@ def run_pipeline(
         # --- Separate (optional) ---
         transcribe_input = work_audio
         tempo_audio_source = work_audio
-        if cfg.separate_stems:
+        if cfg.separate_stems and cfg.lead_rhythm_split:
+            # Lead/Rhythm pre-pass: reuse the guitar-ft path so the split
+            # model receives a single clean guitar stem. Quality flows into
+            # the existing QUALITY_SHIFTS / QUALITY_OVERLAP map.
+            progress("separate", "Isolating guitar stem with guitar-ft Demucs", 0.05)
+            stem_path = output_dir / "guitar_stem.wav"
+            pre_pass_checkpoint = cfg.guitar_checkpoint or GUITAR_FT_CHECKPOINT_ID
+
+            def _pre_pass_progress(message: str, fraction: float) -> None:
+                progress("separate", message or "Isolating guitar stem", fraction)
+
+            try:
+                separate_guitar_stem(
+                    work_audio,
+                    stem_path,
+                    model="htdemucs_6s",
+                    device=cfg.demucs_device,
+                    quality=cfg.demucs_quality,
+                    demucs_segment=cfg.demucs_segment,
+                    demucs_jobs=cfg.demucs_jobs,
+                    guitar_checkpoint=pre_pass_checkpoint,
+                    on_progress=_pre_pass_progress,
+                )
+            except (RuntimeError, FileNotFoundError) as exc:
+                raise RuntimeError(
+                    f"Guitar stem separation failed: {exc}. "
+                    f"For solo guitar, disable separation. {DEMUCS_INSTALL_HINT}"
+                ) from exc
+            quality_diag = analyze_guitar_stem_quality(stem_path)
+            quality_diag.write_json(output_dir / "guitar_stem_quality.json")
+            transcribe_input = stem_path
+            tempo_audio_source = stem_path
+        elif cfg.separate_stems:
             separation_model = resolve_guitar_model(cfg.model, duration_sec)
-            progress("separate", "Separating stems")
+            separate_label = _separate_progress_label(
+                replace(cfg, model=separation_model)
+            )
+            progress("separate", separate_label, 0.05)
             stem_path = output_dir / "guitar_stem.wav"
             try:
                 recovery_diag_path = (
@@ -270,6 +313,10 @@ def run_pipeline(
                     if cfg.sub_bass_debleed or cfg.low_end_restore_db
                     else None
                 )
+
+                def _separate_progress(message: str, fraction: float) -> None:
+                    progress("separate", message or separate_label, fraction)
+
                 separate_guitar_stem(
                     work_audio,
                     stem_path,
@@ -293,6 +340,7 @@ def run_pipeline(
                         else None
                     ),
                     vocal_output=output_dir / "vocals.wav",
+                    on_progress=_separate_progress,
                 )
                 quality_diag = analyze_guitar_stem_quality(stem_path)
                 quality_diag.write_json(output_dir / "guitar_stem_quality.json")
@@ -304,7 +352,25 @@ def run_pipeline(
                     f"For solo guitar, disable separation. {DEMUCS_INSTALL_HINT}"
                 ) from exc
         else:
+            if cfg.lead_rhythm_split:
+                # Input is already an isolated guitar file: skip the pre-pass.
+                stem_path = output_dir / "guitar_stem.wav"
+                shutil.copy2(work_audio, stem_path)
+                transcribe_input = stem_path
+                tempo_audio_source = stem_path
             progress("separate", "skipped: Separation is off")
+
+        if cfg.lead_rhythm_split:
+            return _run_lead_rhythm_stage(
+                cfg=cfg,
+                transcribe_input=transcribe_input,
+                tempo_audio_source=tempo_audio_source,
+                output_dir=output_dir,
+                tmp_path=tmp_path,
+                progress=progress,
+                duration_sec=duration_sec,
+                playback_path=playback_path,
+            )
 
         # --- Transcribe ---
         progress("transcribe", "Detecting notes")
@@ -426,3 +492,239 @@ def run_pipeline(
             artifacts["guitar_stem"] = output_dir / "guitar_stem.wav"
 
         return artifacts
+
+
+def _stem_payload(tx) -> dict:
+    return {
+        "notes": [
+            {
+                "pitch": n.pitch,
+                "start": n.start,
+                "end": n.end,
+                "velocity": n.velocity,
+                "confidence": n.confidence,
+            }
+            for n in tx.notes
+        ],
+        "techniques": [
+            {
+                "kind": m.kind,
+                "start": m.start,
+                "end": m.end,
+                "confidence": m.confidence,
+                "evidence": m.evidence,
+            }
+            for m in tx.techniques
+        ],
+        "low_confidence_regions": [list(r) for r in tx.low_confidence_regions],
+    }
+
+
+def _run_lead_rhythm_stage(
+    *,
+    cfg: PipelineConfig,
+    transcribe_input: Path,
+    tempo_audio_source: Path,
+    output_dir: Path,
+    tmp_path: Path,
+    progress: ProgressCallback,
+    duration_sec: float,
+    playback_path: Path,
+) -> dict[str, Path]:
+    """Lead/rhythm mode: split → per-stem transcription → per-stem tab/export."""
+    progress("separate", "Splitting lead and rhythm guitars", 0.2)
+    try:
+        stems, split_diag = lead_rhythm_sep.run_lead_rhythm_split(
+            transcribe_input,
+            tmp_path / "lead_rhythm_split",
+            device=cfg.demucs_device,
+            on_progress=lambda message, fraction: progress("separate", message, fraction),
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Lead/rhythm split failed: {exc}") from exc
+    lead_stem = output_dir / "lead_guitar.wav"
+    rhythm_stem = output_dir / "rhythm_guitar.wav"
+    shutil.copy2(stems["lead_guitar"], lead_stem)
+    shutil.copy2(stems["rhythm_guitar"], rhythm_stem)
+    diag_path = split_diag.write_json(output_dir / "lead_rhythm_split_diagnostics.json")
+
+    progress("transcribe", "Detecting notes (lead + rhythm)")
+    onset_th, frame_th, min_len_ms = _transcription_thresholds(cfg)
+    cleanup_cfg = _cleanup_config_for_pipeline(cfg)
+    lead_tx = lead_rhythm_tab.transcribe_lead_stem(
+        lead_stem,
+        tmp_path / "lead_transcription.mid",
+        onset_threshold=onset_th,
+        frame_threshold=frame_th,
+        minimum_note_length_ms=min_len_ms,
+        cleanup=cleanup_cfg,
+    )
+    rhythm_tx = lead_rhythm_tab.transcribe_rhythm_stem(
+        rhythm_stem,
+        tmp_path / "rhythm_transcription.mid",
+        onset_threshold=onset_th,
+        frame_threshold=frame_th,
+        minimum_note_length_ms=min_len_ms,
+        cleanup=cleanup_cfg,
+    )
+    warnings: list[str] = []
+    if not lead_tx.notes:
+        warnings.append("Lead stem transcription is empty; low-confidence regions were kept empty.")
+    if not rhythm_tx.notes:
+        warnings.append("Rhythm stem transcription is empty; low-confidence regions were kept empty.")
+    if not lead_tx.notes and not rhythm_tx.notes:
+        raise EmptyTranscriptionError(EMPTY_TRANSCRIPTION_MESSAGE)
+
+    midis = lead_rhythm_tab.write_stem_midis(lead_tx, rhythm_tx, output_dir)
+    notes_path = output_dir / "lead_rhythm_notes.json"
+    notes_path.write_text(
+        json.dumps(
+            {
+                "lead": _stem_payload(lead_tx),
+                "rhythm": _stem_payload(rhythm_tx),
+                "warnings": warnings,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    tempo_est = resolve_tempo(
+        audio_path=tempo_audio_source,
+        midi_path=midis["stems_midi"],
+        override_bpm=cfg.tempo_bpm_override,
+        beat_model=cfg.beat_model,
+    )
+    beats_per_measure = cfg.beats_per_measure
+    if cfg.auto_meter and tempo_est.downbeats:
+        beats_per_measure = tempo_est.beats_per_measure
+    quantization_beats = tempo_est.beats if cfg.tempo_bpm_override is None else ()
+
+    progress("tab", "Mapping tablature (lead + rhythm)")
+    doc_kwargs = {
+        "tempo_bpm": tempo_est.bpm,
+        "tempo_confidence": tempo_est.confidence,
+        "beats_per_measure": beats_per_measure,
+        "tuning_name": cfg.tuning_name,
+        "capo": cfg.capo,
+        "transpose": cfg.transpose,
+        "beats": quantization_beats,
+        "fingering_preference": cfg.fingering_preference,
+    }
+    lead_doc = tab_document_for(midis["lead_midi"], **doc_kwargs)
+    rhythm_doc = tab_document_for(midis["rhythm_midi"], **doc_kwargs)
+    voicing_map = lead_rhythm_tab._canonical_voicing_map(
+        lead_rhythm_tab._rhythm_chord_events(rhythm_tx.notes)
+    )
+    rhythm_doc = lead_rhythm_tab.apply_canonical_voicings(rhythm_doc, voicing_map)
+    combined_doc = tab_document_for(midis["stems_midi"], **doc_kwargs)
+
+    progress("chords", "Recognizing chords")
+    chord_hits = bundle_chords(
+        midis["stems_midi"],
+        transpose=cfg.transpose,
+        capo=cfg.capo,
+        tuning_name=cfg.tuning_name,
+    )
+    song_key = key_for_midi(midis["stems_midi"], transpose=cfg.transpose, capo=cfg.capo)
+
+    vocal_path = output_dir / "vocals.wav"
+    vocal_file = vocal_path if vocal_path.is_file() else None
+    lyric_lines: list = []
+    lyrics_reason = lyrics_skip_reason(vocal_file)
+    if lyrics_reason:
+        progress("lyrics", f"skipped: {lyrics_reason}")
+        lyrics_status = lyrics_reason
+    else:
+        try:
+            lyric_lines = transcribe_lyrics(vocal_file)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.warning("Lyrics transcription failed: %s", exc)
+            lyric_lines = []
+            lyrics_reason = "Lyrics were not produced. The local transcriber failed."
+        lyrics_status = lyrics_reason or (
+            "Lyrics were not produced. The transcriber returned no text."
+        )
+        if lyric_lines:
+            progress("lyrics", "Extracting lyrics")
+            lyrics_status = lyrics_status or ""
+
+    progress("pdf", "Finalizing PDF + MusicXML")
+    export_kwargs = {
+        "capo": cfg.capo,
+        "transpose": cfg.transpose,
+        "bars_per_line": cfg.bars_per_line,
+        "duration_sec": duration_sec,
+        "tempo_bpm": tempo_est.bpm,
+        "tempo_confidence": tempo_est.confidence,
+        "tuning_name": cfg.tuning_name,
+        "lyrics": lyric_lines,
+        "lyrics_status": lyrics_status,
+        "beats_per_measure": beats_per_measure,
+        "beats": quantization_beats,
+        "downbeats": tempo_est.downbeats,
+        "anacrusis_sec": tempo_est.anacrusis_sec,
+        "fingering_preference": cfg.fingering_preference,
+        "export_gp5": cfg.export_gp5,
+    }
+    lead_written = write_tab_exports(
+        lead_doc,
+        output_dir / "lead",
+        title=f"{cfg.title} (Lead)",
+        chords=[],
+        key=song_key,
+        **export_kwargs,
+    )
+    rhythm_written = write_tab_exports(
+        rhythm_doc,
+        output_dir / "rhythm",
+        title=f"{cfg.title} (Rhythm)",
+        chords=chord_hits,
+        key=song_key,
+        **export_kwargs,
+    )
+    combined_written = write_tab_exports(
+        combined_doc,
+        output_dir,
+        title=cfg.title,
+        chords=chord_hits,
+        key=song_key,
+        **export_kwargs,
+    )
+    musicxml_path = musicxml_export.write_musicxml(
+        [("Lead", lead_doc), ("Rhythm", rhythm_doc)],
+        output_dir / "transcription.musicxml",
+        title=cfg.title,
+        tempo_bpm=tempo_est.bpm,
+    )
+
+    progress("done", "Pipeline complete")
+    artifacts: dict[str, Path] = {
+        "midi": midis["stems_midi"],
+        "tab": combined_written["tab"],
+        "pdf": combined_written["pdf"],
+        "result": combined_written["result"],
+        "playback": playback_path,
+        "guitar_stem": output_dir / "guitar_stem.wav",
+        "lead_guitar": lead_stem,
+        "rhythm_guitar": rhythm_stem,
+        "lead_rhythm_split_diagnostics": diag_path,
+        "lead_rhythm_notes": notes_path,
+        "lead_midi": midis["lead_midi"],
+        "rhythm_midi": midis["rhythm_midi"],
+        "stems_midi": midis["stems_midi"],
+        "musicxml": musicxml_path,
+        "lead_tab": lead_written["tab"],
+        "lead_pdf": lead_written["pdf"],
+        "lead_result": lead_written["result"],
+        "rhythm_tab": rhythm_written["tab"],
+        "rhythm_pdf": rhythm_written["pdf"],
+        "rhythm_result": rhythm_written["result"],
+    }
+    if "gp5" in combined_written:
+        artifacts["gp5"] = combined_written["gp5"]
+    if "gp5" in lead_written:
+        artifacts["lead_gp5"] = lead_written["gp5"]
+    if "gp5" in rhythm_written:
+        artifacts["rhythm_gp5"] = rhythm_written["gp5"]
+    return artifacts
