@@ -67,6 +67,10 @@ MBR_LEAD_RHYTHM_CONFIG_SHA256 = (
 
 LEAD_RHYTHM_STEM_NAMES = ("lead_guitar", "rhythm_guitar")
 
+class LeadRhythmSplitError(RuntimeError):
+    """User-facing lead/rhythm split failure. Raised as-is, never wrapped."""
+
+
 INSTALL_HINT = (
     "Lead/Rhythm split requires the RoFormer runtime: pip install -e \".[roformer]\""
 )
@@ -259,7 +263,7 @@ class LeadRhythmSplitDiagnostics:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "LeadRhythmSplitDiagnostics":
+    def from_dict(cls, data: dict) -> LeadRhythmSplitDiagnostics:
         def stats(raw: dict | None) -> StemAudioStats | None:
             return StemAudioStats(**raw) if isinstance(raw, dict) else None
 
@@ -290,9 +294,13 @@ def _stem_stats(path: Path, sr: int) -> StemAudioStats:
     rms = float(np.sqrt(np.mean(mono * mono))) if mono.size else 0.0
     peak = float(np.max(np.abs(data))) if data.size else 0.0
     frame_db = _frame_rms_db(mono, sr, ENVELOPE_WIN_SEC)
-    silence_ratio = (
-        float(np.mean(frame_db < SILENCE_FRAME_DBFS)) if frame_db.size else 1.0
-    )
+    if frame_db.size:
+        silence_ratio = float(np.mean(frame_db < SILENCE_FRAME_DBFS))
+    else:
+        # Shorter than one analysis frame: judge the whole signal instead.
+        silence_ratio = (
+            1.0 if 20.0 * math.log10(max(rms, 1e-10)) < SILENCE_FRAME_DBFS else 0.0
+        )
     return StemAudioStats(
         rms_dbfs=20.0 * math.log10(max(rms, 1e-10)),
         peak=peak,
@@ -401,7 +409,7 @@ def run_lead_rhythm_split(
     combined guitar stem inside this mode.
     """
     if not is_lead_rhythm_split_available():
-        raise RuntimeError(f"Lead/rhythm split is not available. {INSTALL_HINT}")
+        raise LeadRhythmSplitError(f"Lead/rhythm split is not available. {INSTALL_HINT}")
 
     def _prog(message: str, fraction: float) -> None:
         if on_progress is not None:
@@ -421,12 +429,9 @@ def run_lead_rhythm_split(
     n_overlap = int(infer_cfg.get("num_overlap") or 2)
 
     try:
-        info = sf.info(str(guitar_path))
-        input_sr = int(info.samplerate)
-        input_channels = int(info.channels)
-        input_duration = float(info.duration)
+        input_sr = int(sf.info(str(guitar_path)).samplerate)
     except Exception:
-        input_sr = input_channels = input_duration = None  # type: ignore[assignment]
+        input_sr = None
     resampled = bool(input_sr is not None and input_sr != model_sr)
 
     try:
@@ -450,11 +455,11 @@ def run_lead_rhythm_split(
             [lead, rhythm], list(LEAD_RHYTHM_STEM_NAMES), output_dir, model_sr
         )
     except Exception as exc:
-        raise RuntimeError(f"Lead/rhythm split failed: {exc}") from exc
+        raise LeadRhythmSplitError(f"Lead/rhythm split failed: {exc}") from exc
 
     missing = [name for name in LEAD_RHYTHM_STEM_NAMES if name not in artifacts]
     if missing:
-        raise RuntimeError(f"Lead/rhythm split failed: missing stems {missing}")
+        raise LeadRhythmSplitError(f"Lead/rhythm split failed: missing stems {missing}")
 
     diag = analyze_lead_rhythm_stems(
         artifacts["lead_guitar"],

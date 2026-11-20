@@ -225,3 +225,25 @@ def test_defaults_unchanged_and_model_alias():
     assert cfg.model == "auto"
     aliased = PipelineConfig(model="lead_rhythm_split")
     assert aliased.lead_rhythm_split is True
+
+
+def test_split_error_not_double_prefixed(tmp_path, monkeypatch):
+    _patch_common(monkeypatch, tmp_path)
+    _patch_transcriptions(monkeypatch, tmp_path)
+
+    def already_wrapped(*a, **k):
+        raise lead_rhythm_sep.LeadRhythmSplitError(
+            "Lead/rhythm split is not available. install hint"
+        )
+
+    monkeypatch.setattr(lead_rhythm_sep, "run_lead_rhythm_split", already_wrapped)
+    with pytest.raises(RuntimeError) as excinfo:
+        _run(tmp_path)
+    assert str(excinfo.value).startswith("Lead/rhythm split is not available.")
+
+    def raw_error(*a, **k):
+        raise ValueError("backend exploded")
+
+    monkeypatch.setattr(lead_rhythm_sep, "run_lead_rhythm_split", raw_error)
+    with pytest.raises(RuntimeError, match="Lead/rhythm split failed: backend exploded"):
+        _run(tmp_path)

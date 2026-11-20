@@ -127,7 +127,7 @@ class PipelineConfig:
             raise ValueError(f"bars_per_line must be 1..8, got {self.bars_per_line}")
 
 
-ProgressCallback = Callable[..., None]  # stage, message, optional fraction
+ProgressCallback = Callable[[str, str], None]  # stage, message
 
 
 def _noop_progress(stage: str, message: str, fraction: float | None = None) -> None:
@@ -302,10 +302,7 @@ def run_pipeline(
             tempo_audio_source = stem_path
         elif cfg.separate_stems:
             separation_model = resolve_guitar_model(cfg.model, duration_sec)
-            separate_label = _separate_progress_label(
-                replace(cfg, model=separation_model)
-            )
-            progress("separate", separate_label, 0.05)
+            progress("separate", "Separating stems")
             stem_path = output_dir / "guitar_stem.wav"
             try:
                 recovery_diag_path = (
@@ -313,10 +310,6 @@ def run_pipeline(
                     if cfg.sub_bass_debleed or cfg.low_end_restore_db
                     else None
                 )
-
-                def _separate_progress(message: str, fraction: float) -> None:
-                    progress("separate", message or separate_label, fraction)
-
                 separate_guitar_stem(
                     work_audio,
                     stem_path,
@@ -340,7 +333,6 @@ def run_pipeline(
                         else None
                     ),
                     vocal_output=output_dir / "vocals.wav",
-                    on_progress=_separate_progress,
                 )
                 quality_diag = analyze_guitar_stem_quality(stem_path)
                 quality_diag.write_json(output_dir / "guitar_stem_quality.json")
@@ -540,8 +532,10 @@ def _run_lead_rhythm_stage(
             device=cfg.demucs_device,
             on_progress=lambda message, fraction: progress("separate", message, fraction),
         )
+    except lead_rhythm_sep.LeadRhythmSplitError:
+        raise
     except Exception as exc:
-        raise RuntimeError(f"Lead/rhythm split failed: {exc}") from exc
+        raise lead_rhythm_sep.LeadRhythmSplitError(f"Lead/rhythm split failed: {exc}") from exc
     lead_stem = output_dir / "lead_guitar.wav"
     rhythm_stem = output_dir / "rhythm_guitar.wav"
     shutil.copy2(stems["lead_guitar"], lead_stem)
@@ -613,10 +607,20 @@ def _run_lead_rhythm_stage(
     }
     lead_doc = tab_document_for(midis["lead_midi"], **doc_kwargs)
     rhythm_doc = tab_document_for(midis["rhythm_midi"], **doc_kwargs)
+    from audio_to_tab.chords import sounding_semitones as _sounding_semitones
+    from audio_to_tab.tuning import tuning_preset as _tuning_preset
+
+    opens, _tuning_names = _tuning_preset(cfg.tuning_name)
+    capo_opens = tuple(min(127, note + int(cfg.capo)) for note in opens)
+    display_shift = _sounding_semitones(transpose=cfg.transpose, capo=cfg.capo)
     voicing_map = lead_rhythm_tab._canonical_voicing_map(
-        lead_rhythm_tab._rhythm_chord_events(rhythm_tx.notes)
+        lead_rhythm_tab._rhythm_chord_events(rhythm_tx.notes),
+        tuning=capo_opens,
+        semitones=display_shift,
     )
-    rhythm_doc = lead_rhythm_tab.apply_canonical_voicings(rhythm_doc, voicing_map)
+    rhythm_doc = lead_rhythm_tab.apply_canonical_voicings(
+        rhythm_doc, voicing_map, tuning=capo_opens
+    )
     combined_doc = tab_document_for(midis["stems_midi"], **doc_kwargs)
 
     progress("chords", "Recognizing chords")

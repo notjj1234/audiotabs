@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -170,7 +169,7 @@ def test_pinned_sha256_format():
 
 
 class TestRunLeadRhythmSplit:
-    def _patch_runtime(self, monkeypatch, tmp_path, sample_rate=44100):
+    def _patch_runtime(self, monkeypatch, tmp_path, sample_rate=44100, chunk_size=132300):
         import numpy as np
 
         from audio_to_tab import roformer
@@ -180,7 +179,8 @@ class TestRunLeadRhythmSplit:
         )
         yaml_path = tmp_path / "cfg.yaml"
         yaml_path.write_text(
-            VERIFIED_YAML.replace("  sample_rate: 44100", f"  sample_rate: {sample_rate}", 1),
+            VERIFIED_YAML.replace("  sample_rate: 44100", f"  sample_rate: {sample_rate}", 1)
+            .replace("  chunk_size: 132300", f"  chunk_size: {chunk_size}", 1),
             encoding="utf-8",
         )
         ckpt = tmp_path / "model.ckpt"
@@ -241,14 +241,14 @@ class TestRunLeadRhythmSplit:
 
         from audio_to_tab.lead_rhythm_sep import run_lead_rhythm_split
 
-        calls = self._patch_runtime(monkeypatch, tmp_path, sample_rate=22050)
+        calls = self._patch_runtime(monkeypatch, tmp_path, sample_rate=22050, chunk_size=66150)
         src = tmp_path / "guitar.wav"
         sf.write(str(src), np.zeros((22050, 2), dtype=np.float32), 22050)
 
-        artifacts, diag = run_lead_rhythm_split(src, tmp_path / "out")
+        _, diag = run_lead_rhythm_split(src, tmp_path / "out")
 
         assert calls["load_sr"] == 22050  # read from YAML, not hardcoded
-        assert calls["chunk_size"] == 132300
+        assert calls["chunk_size"] == 66150  # non-default proves YAML-driven
         assert calls["n_overlap"] == 2
         assert calls["num_stems"] == 1
         assert diag.resampled is False
@@ -279,7 +279,7 @@ class TestRunLeadRhythmSplit:
         monkeypatch.setattr(lead_rhythm_sep, "is_lead_rhythm_split_available", lambda: False)
         src = tmp_path / "guitar.wav"
         sf.write(str(src), np.zeros((44100, 2), dtype=np.float32), 44100)
-        with pytest.raises(RuntimeError, match="[Ll]ead/rhythm"):
+        with pytest.raises(RuntimeError, match=r"[Ll]ead/rhythm"):
             lead_rhythm_sep.run_lead_rhythm_split(src, tmp_path / "out")
         assert not (tmp_path / "out").exists()
 

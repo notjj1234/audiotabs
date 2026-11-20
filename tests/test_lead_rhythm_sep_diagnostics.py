@@ -171,3 +171,19 @@ class TestEnvelopeCorrelation:
         y = rng.standard_normal(SR * 3).astype(np.float32)
         r = pearson_rms_correlation(x, y, SR)
         assert r is not None and -1.0 <= r <= 1.0
+
+
+def test_sub_frame_stem_does_not_report_full_silence(tmp_path):
+    import soundfile as sf
+
+    from audio_to_tab.lead_rhythm_sep import _stem_stats
+
+    # 20 ms audible blip — shorter than one 50 ms frame.
+    sr = SR
+    blip = np.zeros(int(0.02 * sr), dtype=np.float32)
+    blip[:] = 0.5
+    path = tmp_path / "blip.wav"
+    sf.write(str(path), blip, sr)
+    stats = _stem_stats(path, sr)
+    assert stats.silence_ratio == 0.0
+    assert stats.rms_dbfs > -40.0

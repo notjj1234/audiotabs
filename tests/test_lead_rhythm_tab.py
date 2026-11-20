@@ -279,3 +279,37 @@ class TestStemMidis:
         assert len(pm.instruments) == 2
         assert {inst.name for inst in pm.instruments} == {"Lead", "Rhythm"}
         assert sum(len(i.notes) for i in pm.instruments) == 3
+
+
+class TestVoicingShift:
+    def test_capo_transpose_still_rewrites_repeated_progression(self):
+        e_major = [_note(40, 0.0, 1.0), _note(44, 0.0, 1.0), _note(47, 0.0, 1.0)]
+        g_major = [_note(43, 1.0, 2.0), _note(47, 1.0, 2.0), _note(50, 1.0, 2.0)]
+        e_major_again = [_note(40, 2.0, 3.0), _note(44, 2.0, 3.0), _note(47, 2.0, 3.0)]
+        g_major_again = [_note(43, 3.0, 4.0), _note(47, 3.0, 4.0), _note(50, 3.0, 4.0)]
+        events = _rhythm_chord_events(e_major + g_major + e_major_again + g_major_again)
+        # Capo 2: concert pitches shift +2 for display; tuning opens shift +2.
+        tuning = (42, 47, 52, 57, 61, 66)
+        voicings = _canonical_voicing_map(events, tuning=tuning, semitones=2)
+        assert len(voicings) == 2
+
+        def doc_for(pitches, start):
+            return TabEvent(
+                start=start,
+                notes=[
+                    TabNote(start=start, end=start + 1.0, string=0, fret=p - 42, pitch=p)
+                    for p in pitches
+                ],
+            )
+
+        doc = TabDocument(
+            events=[
+                doc_for([42, 46, 49], 0.0),
+                doc_for([45, 49, 52], 1.0),
+                doc_for([42, 46, 49], 2.0),
+            ]
+        )
+        out = apply_canonical_voicings(doc, voicings, tuning=tuning)
+        first = sorted((n.string, n.fret) for n in out.events[0].notes)
+        again = sorted((n.string, n.fret) for n in out.events[2].notes)
+        assert first == again

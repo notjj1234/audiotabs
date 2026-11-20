@@ -40,7 +40,7 @@ def _pitch_elements(parent: ET.Element, pitch: int) -> None:
 
 def _duration_ticks(note: TabNote, sec_per_quarter: float) -> int:
     seconds = max(0.01, float(note.end) - float(note.start))
-    return max(1, int(round(seconds / sec_per_quarter * DIVISIONS)))
+    return max(1, round(seconds / sec_per_quarter * DIVISIONS))
 
 
 def _type_name(ticks: int) -> str:
@@ -75,6 +75,7 @@ def _line_midi(tuning_names: tuple[str, ...]) -> list[int]:
 def _write_part(part_el: ET.Element, doc: TabDocument) -> None:
     sec_per_quarter = 60.0 / max(1.0, float(doc.tempo_bpm))
     measure_sec = sec_per_quarter * max(1, int(doc.beats_per_measure))
+    measure_ticks = max(1, int(doc.beats_per_measure)) * DIVISIONS
 
     events = sorted(doc.events, key=lambda ev: ev.start)
     measure_count = max(1, int(max((ev.start for ev in events), default=0.0) / measure_sec) + 1)
@@ -103,19 +104,44 @@ def _write_part(part_el: ET.Element, doc: TabDocument) -> None:
                     ET.SubElement(tuning, "tuning-alter").text = "1"
                 ET.SubElement(tuning, "tuning-octave").text = str(midi // 12 - 1)
 
+        measure_start_sec = measure_index * measure_sec
+        cursor = 0
         for event in events:
             if int(event.start / measure_sec) != measure_index:
                 continue
-            for note in sorted(event.notes, key=lambda n: (n.string, n.fret)):
-                note_el = ET.SubElement(measure, "note")
-                _pitch_elements(note_el, int(note.pitch))
+            start_ticks = max(
+                0, round((event.start - measure_start_sec) / sec_per_quarter * DIVISIONS)
+            )
+            if start_ticks > cursor:
+                forward = ET.SubElement(measure, "forward")
+                ET.SubElement(forward, "duration").text = str(start_ticks - cursor)
+                cursor = start_ticks
+            elif start_ticks < cursor:
+                backup = ET.SubElement(measure, "backup")
+                ET.SubElement(backup, "duration").text = str(cursor - start_ticks)
+                cursor = start_ticks
+
+            ordered = sorted(event.notes, key=lambda n: (n.string, n.fret))
+            group_ticks = 0
+            for index, note in enumerate(ordered):
                 ticks = _duration_ticks(note, sec_per_quarter)
-                ET.SubElement(note_el, "duration").text = str(ticks)
+                note_el = ET.SubElement(measure, "note")
+                if index > 0:
+                    # Chord tone: same onset as the previous note, no duration.
+                    ET.SubElement(note_el, "chord")
+                _pitch_elements(note_el, int(note.pitch))
+                if index == 0:
+                    ET.SubElement(note_el, "duration").text = str(ticks)
                 ET.SubElement(note_el, "type").text = _type_name(ticks)
                 notations = ET.SubElement(note_el, "notations")
                 technical = ET.SubElement(notations, "technical")
                 ET.SubElement(technical, "string").text = str(6 - int(note.string))
                 ET.SubElement(technical, "fret").text = str(int(note.fret))
+                group_ticks = max(group_ticks, ticks if index == 0 else 0)
+            cursor += group_ticks
+        if cursor < measure_ticks:
+            forward = ET.SubElement(measure, "forward")
+            ET.SubElement(forward, "duration").text = str(measure_ticks - cursor)
 
 
 def write_musicxml(
@@ -148,8 +174,8 @@ def write_musicxml(
             direction_type = ET.SubElement(direction, "direction-type")
             metronome = ET.SubElement(direction_type, "metronome")
             ET.SubElement(metronome, "beat-unit").text = "quarter"
-            ET.SubElement(metronome, "per-minute").text = str(int(round(tempo_bpm)))
-            ET.SubElement(direction, "sound", tempo=str(int(round(tempo_bpm))))
+            ET.SubElement(metronome, "per-minute").text = str(round(tempo_bpm))
+            ET.SubElement(direction, "sound", tempo=str(round(tempo_bpm)))
             first_measure.insert(0, direction)
 
     tree = ET.ElementTree(root)

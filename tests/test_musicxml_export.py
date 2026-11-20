@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
-from audio_to_tab.tab_generate import TabDocument, TabEvent, TabNote
 from audio_to_tab.musicxml_export import write_musicxml
+from audio_to_tab.tab_generate import TabDocument, TabEvent, TabNote
 
 
 def _doc(events, tempo=120.0, beats_per_measure=4):
@@ -69,7 +68,7 @@ def test_fret_and_string_round_trip(tmp_path):
     strings = [int(el.text) for el in lead_part.findall(".//technical/string")]
     frets = [int(el.text) for el in lead_part.findall(".//technical/fret")]
     # MusicXML string 1 = high e; TabNote.string 0 = low E -> 6 - string.
-    assert sorted(zip(strings, frets)) == sorted([(6, 3), (4, 0)])
+    assert sorted(zip(strings, frets, strict=True)) == sorted([(6, 3), (4, 0)])
     rhythm_part = root.findall("part")[1]
     rhythm_strings = [int(el.text) for el in rhythm_part.findall(".//technical/string")]
     assert rhythm_strings == [6, 5, 4]
@@ -123,3 +122,44 @@ def test_empty_document_still_writes_score(tmp_path):
     root = ET.parse(str(out)).getroot()
     assert root.tag == "score-partwise"
     assert len(root.findall("part")) == 1
+
+
+class TestMeasureTiming:
+    def test_chord_tones_use_chord_elements(self, tmp_path):
+        out = write_musicxml(_fixture_docs(), tmp_path / "s.xml", title="T", tempo_bpm=120.0)
+        root = ET.parse(str(out)).getroot()
+        rhythm_part = root.findall("part")[1]
+        chord_marks = rhythm_part.findall(".//note/chord")
+        # Three simultaneous notes -> one primary + two chord tones.
+        assert len(chord_marks) == 2
+        for note in rhythm_part.findall(".//note"):
+            if note.find("chord") is not None:
+                assert note.find("duration") is None
+            else:
+                assert note.find("duration") is not None
+
+    def test_forward_fills_gap_between_events(self, tmp_path):
+        # Lead: 0.5 s note at 0.0, 1.0 s note at 1.0 (120 BPM, 4/4 -> 2 s measure).
+        out = write_musicxml(_fixture_docs(), tmp_path / "s.xml", title="T", tempo_bpm=120.0)
+        root = ET.parse(str(out)).getroot()
+        lead_measure = root.findall("part")[0].find("measure")
+        forward = lead_measure.find("forward")
+        assert forward is not None
+        assert int(forward.findtext("duration")) == 480  # 0.5 s gap = one quarter
+        total = sum(
+            int(el.findtext("duration"))
+            for el in lead_measure
+            if el.tag in ("note", "forward", "backup") and el.findtext("duration")
+        )
+        assert total == 4 * 480  # measure totals the time signature
+
+    def test_measure_totals_time_signature_for_chords(self, tmp_path):
+        out = write_musicxml(_fixture_docs(), tmp_path / "s.xml", title="T", tempo_bpm=120.0)
+        root = ET.parse(str(out)).getroot()
+        rhythm_measure = root.findall("part")[1].find("measure")
+        total = sum(
+            int(el.findtext("duration"))
+            for el in rhythm_measure
+            if el.tag in ("note", "forward", "backup") and el.findtext("duration")
+        )
+        assert total == 4 * 480

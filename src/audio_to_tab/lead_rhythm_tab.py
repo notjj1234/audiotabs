@@ -188,12 +188,18 @@ def _rhythm_chord_events(notes: list[StemNote]) -> list[list[StemNote]]:
 
 
 def _canonical_voicing_map(
-    events: list[list[StemNote]], tuning: tuple[int, ...] = STANDARD_TUNING_MIDI
+    events: list[list[StemNote]],
+    tuning: tuple[int, ...] = STANDARD_TUNING_MIDI,
+    semitones: int = 0,
 ) -> dict[frozenset[int], tuple[tuple[int, int], ...]]:
-    """One canonical (string, fret) voicing per repeated pitch-class set."""
+    """One canonical (string, fret) voicing per repeated pitch-class set.
+
+    ``semitones``/``tuning`` must match the display document (capo/transpose
+    shift pitches the same way ``tab_document_for`` does).
+    """
     seen: dict[frozenset[int], list[list[StemNote]]] = {}
     for event in events:
-        pcs = frozenset(n.pitch % 12 for n in event)
+        pcs = frozenset((n.pitch + semitones) % 12 for n in event)
         seen.setdefault(pcs, []).append(event)
     voicings: dict[frozenset[int], tuple[tuple[int, int], ...]] = {}
     for pcs, occurrences in seen.items():
@@ -201,7 +207,7 @@ def _canonical_voicing_map(
             continue
         first = sorted(occurrences[0], key=lambda n: n.pitch)
         positions = _pick_chord_positions(
-            [n.pitch for n in first],
+            [n.pitch + semitones for n in first],
             tuning,
             hand_fret=5.0,
             max_fret=15,
@@ -213,7 +219,9 @@ def _canonical_voicing_map(
 
 
 def apply_canonical_voicings(
-    doc: TabDocument, voicings: dict[frozenset[int], tuple[tuple[int, int], ...]]
+    doc: TabDocument,
+    voicings: dict[frozenset[int], tuple[tuple[int, int], ...]],
+    tuning: tuple[int, ...] = STANDARD_TUNING_MIDI,
 ) -> TabDocument:
     """Rewrite chord events whose pitch-class set has a canonical voicing."""
     if not voicings:
@@ -231,7 +239,7 @@ def apply_canonical_voicings(
             candidates = [
                 (s, f)
                 for (s, f) in voicing
-                if (s, f) not in used and abs(note.pitch - (STANDARD_TUNING_MIDI[s] + f)) == 0
+                if (s, f) not in used and note.pitch - (tuning[s] + f) == 0
             ]
             if not candidates:
                 candidates = [(s, f) for (s, f) in voicing if (s, f) not in used]
