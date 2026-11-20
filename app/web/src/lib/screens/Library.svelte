@@ -9,6 +9,7 @@
     created_at: number;
     artifacts: Record<string, boolean>;
     details: Record<string, unknown>;
+    diagnostics?: Record<string, unknown> | null;
     feedback: Record<string, unknown> | null;
     source: Record<string, unknown> | null;
     config: Record<string, unknown> | null;
@@ -53,6 +54,12 @@
       {#each runs as run (run.id)}
         <li class="row">
           <span class="title">{run.title || 'Untitled run'}</span>
+          {#if run.config?.model === 'lead_rhythm_split'}
+            <span class="chip">Lead/Rhythm split</span>
+          {/if}
+          {#if Array.isArray(run.diagnostics?.warnings) && (run.diagnostics?.warnings?.length ?? 0) > 0}
+            <span class="chip warn" title="Split quality warnings">⚠ {run.diagnostics?.warnings?.length}</span>
+          {/if}
           <span class="date">{formatDate(run.created_at)}</span>
         </li>
       {/each}
@@ -131,5 +138,19 @@
     color: var(--muted);
     font-size: var(--fs-2);
     font-family: var(--font-mono);
+  }
+
+  .chip {
+    font-size: var(--fs-1);
+    font-family: var(--font-mono);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-1);
+    padding: 0 var(--space-2);
+    white-space: nowrap;
+  }
+
+  .chip.warn {
+    color: var(--text);
   }
 </style>

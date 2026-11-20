@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,6 +11,18 @@ from .auth import require_token
 from .store import RunRecord, delete_run, get_run, list_runs
 
 router = APIRouter(dependencies=[Depends(require_token)])
+
+
+def _load_diagnostics(record: RunRecord) -> dict | None:
+    """Parsed lead/rhythm split diagnostics when the run produced them."""
+    path = record.artifacts.get("lead_rhythm_split_diagnostics")
+    if path is None:
+        return None
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _serialize(record: RunRecord) -> dict:
@@ -24,6 +37,7 @@ def _serialize(record: RunRecord) -> dict:
         "feedback": record.feedback,
         "source": record.source,
         "config": record.config,
+        "diagnostics": _load_diagnostics(record),
     }
 
 

@@ -178,3 +178,33 @@ def test_api_delete_run(client, tmp_path):
     assert not run_dir.exists()
     assert client.delete("/api/runs/run-1", headers=_TOKEN).status_code == 404
     assert client.delete("/api/runs/%2E%2E", headers=_TOKEN).status_code == 404
+
+
+def test_api_run_includes_lead_rhythm_diagnostics(client, tmp_path):
+    run_dir = _seed_run(
+        tmp_path,
+        "lr-run",
+        extra={"config": {"model": "lead_rhythm_split"}},
+    )
+    diag = {
+        "warnings": ["Input is mono"],
+        "envelope_correlation": 0.42,
+        "lead": {"rms_dbfs": -21.0},
+    }
+    diag_path = run_dir / "lead_rhythm_split_diagnostics.json"
+    diag_path.write_text(json.dumps(diag), encoding="utf-8")
+    meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
+    meta["artifacts"]["lead_rhythm_split_diagnostics"] = str(diag_path)
+    (run_dir / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    body = client.get("/api/runs/lr-run", headers=_TOKEN).json()
+    assert body["diagnostics"] == diag
+
+    # Mode chip signal for the web UI.
+    assert body["config"]["model"] == "lead_rhythm_split"
+
+
+def test_api_run_diagnostics_none_when_absent(client, tmp_path):
+    _seed_run(tmp_path, "plain-run")
+    body = client.get("/api/runs/plain-run", headers=_TOKEN).json()
+    assert body["diagnostics"] is None
