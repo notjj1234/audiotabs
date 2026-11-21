@@ -211,3 +211,14 @@ def test_write_tab_exports_includes_gp5_when_requested(tmp_path: Path):
 
     assert artifacts["gp5"].is_file()
     assert guitarpro.parse(str(artifacts["gp5"])).tracks[0].name == "Test riff"
+
+
+def test_gp5_export_accepts_unicode_title_outside_cp1252(tmp_path: Path):
+    """PyGuitarPro encodes with cp1252; titles like 【…】 must not abort Convert."""
+    path = tmp_path / "unicode-title.gp5"
+
+    write_guitar_pro(_document(), path, title="【Official】 Riff")
+
+    song = guitarpro.parse(str(path))
+    assert song.title == "Official Riff"
+    assert song.tracks[0].name == "Official Riff"

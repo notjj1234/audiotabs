@@ -122,6 +122,12 @@ def _fill_measure(voice, groups: list[tuple[int, int, list[tuple[TabNote, bool]]
         _append_beat(voice, cursor, measure_ticks - cursor, [], tied=False)
 
 
+def _gp5_safe_text(value: str, *, fallback: str = "Untitled") -> str:
+    """PyGuitarPro writes GP5 strings as cp1252; drop characters that cannot encode."""
+    cleaned = " ".join(str(value or "").encode("cp1252", errors="ignore").decode("cp1252").split())
+    return cleaned or fallback
+
+
 def write_guitar_pro(doc: TabDocument, output_path: str | Path, *, title: str) -> Path:
     """Write a quantized tab document as GP5, preserving fret/string assignments."""
     if importlib.util.find_spec("guitarpro") is None:
@@ -130,7 +136,8 @@ def write_guitar_pro(doc: TabDocument, output_path: str | Path, *, title: str) -
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    song = guitarpro.Song(title=title, tempo=max(1, round(doc.tempo_bpm)))
+    safe_title = _gp5_safe_text(title)
+    song = guitarpro.Song(title=safe_title, tempo=max(1, round(doc.tempo_bpm)))
     measure_ticks = doc.beats_per_measure * 960
     measures = _note_segments(doc)
     assigned_measures = {
@@ -157,7 +164,9 @@ def write_guitar_pro(doc: TabDocument, output_path: str | Path, *, title: str) -
         for note in event.notes:
             open_pitches[5 - note.string] = note.pitch - note.fret
     for index, track in enumerate(song.tracks):
-        track.name = title if index == 0 else f"{title} (overflow {index})"
+        track.name = (
+            safe_title if index == 0 else _gp5_safe_text(f"{safe_title} (overflow {index})")
+        )
         track.strings = [
             guitarpro.GuitarString(number=string_index + 1, value=value)
             for string_index, value in enumerate(open_pitches)

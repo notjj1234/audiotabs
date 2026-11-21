@@ -22,25 +22,50 @@ def hero_html(*, icon_data_uri: str | None = None) -> str:
     return f"""
 <div class="studio-hero">
   {icon}
-  <h1>Tab PDF</h1>
+  <div class="studio-hero-title">Tab PDF</div>
 </div>
 """
 
 
-def progress_card_html(rows: list[dict[str, str]]) -> str:
+def progress_card_html(
+    rows: list[dict[str, str]],
+    *,
+    elapsed_sec: float | None = None,
+    tip: str | None = None,
+) -> str:
+    from audio_to_tab.progress_checklist import STAGE_WEIGHTS
+    from audio_to_tab.progress_tips import format_elapsed
+
     items: list[str] = []
     active_label = ""
-    finished = 0
+    finished_count = 0
+    finished_weight = 0.0
+    active_weight = 0.0
+    active_fraction = 0.0
+    total_weight = 0.0
     for row in rows:
         state = str(row.get("state") or "pending")
         word = _STATE_WORDS.get(state, "Waiting")
-        label = escape(str(row.get("label") or ""))
+        raw_label = str(row.get("label") or "")
+        label = escape(raw_label)
         detail = str(row.get("detail") or "").strip()
-        detail_html = f" — {escape(detail)}" if detail else ""
+        if detail and detail.casefold() != raw_label.casefold():
+            detail_html = f" — {escape(detail)}"
+        else:
+            detail_html = ""
+        stage_id = str(row.get("id") or "")
+        weight = float(STAGE_WEIGHTS.get(stage_id, 1.0))
+        total_weight += weight
         if state == "active" and not active_label:
-            active_label = str(row.get("label") or "Transcribing")
+            active_label = raw_label or "Transcribing"
+            active_weight = weight
+            try:
+                active_fraction = max(0.0, min(1.0, float(row.get("fraction") or 0.05)))
+            except (TypeError, ValueError):
+                active_fraction = 0.05
         if state in {"done", "skipped"}:
-            finished += 1
+            finished_count += 1
+            finished_weight += weight
         items.append(
             f'<li class="{escape(state)}">'
             f'<span class="mark" aria-hidden="true"></span>'
@@ -48,29 +73,56 @@ def progress_card_html(rows: list[dict[str, str]]) -> str:
             f'<span class="state {escape(state)}">{escape(word)}</span>'
             f"</li>"
         )
-    total = max(len(rows), 1)
-    working = any(str(row.get("state") or "") == "active" for row in rows)
-    ratio = (finished + (0.45 if working else 0.0)) / total
+    total_weight = max(total_weight, 1.0)
+    ratio = (finished_weight + active_weight * active_fraction) / total_weight
     percent = max(0, min(100, round(ratio * 100)))
     if active_label:
         heading = active_label
-    elif rows and finished == len(rows):
+    elif rows and finished_count == len(rows):
         heading = "Ready"
+        percent = 100
     else:
         heading = "Transcribing"
+    elapsed_html = ""
+    if elapsed_sec is not None:
+        elapsed_html = (
+            f'<span class="studio-progress-elapsed">Elapsed {escape(format_elapsed(elapsed_sec))}</span>'
+        )
+    tip_text = str(tip or "").strip()
+    tip_html = (
+        f'<p class="studio-progress-tip">{escape(tip_text)}</p>' if tip_text else ""
+    )
     body = "\n".join(items)
     return f"""
 <div class="studio-progress" role="status" aria-live="polite">
   <div class="head">
     <span class="pct">{percent}%</span>
     <h3>{escape(heading)}</h3>
+    {elapsed_html}
   </div>
   <div class="studio-progress-bar" role="progressbar" aria-valuenow="{percent}" aria-valuemin="0" aria-valuemax="100">
     <span style="width:{percent}%"></span>
   </div>
+  {tip_html}
   <ul>
 {body}
   </ul>
+</div>
+"""
+
+
+def depth_banner_html(actions: list[dict]) -> str:
+    if not actions:
+        return ""
+    items = "".join(
+        f'<li>{escape(str(item.get("label") or item.get("id") or ""))}</li>'
+        for item in actions
+    )
+    return f"""
+<div class="studio-depth-banner">
+  <div class="studio-depth-banner-title">Go deeper</div>
+  <p class="studio-depth-banner-copy">Explore views and exports that prove the tab.</p>
+  <ul class="studio-depth-banner-list">{items}</ul>
 </div>
 """
 
@@ -111,7 +163,7 @@ def result_header_html(
 def recent_conversions_heading_html() -> str:
     return """
 <div class="studio-recent-heading">
-  <h3>Recent conversions</h3>
+  <div class="studio-recent-heading-label">Recent conversions</div>
 </div>
 """
 

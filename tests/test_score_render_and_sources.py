@@ -99,7 +99,7 @@ def test_reopen_with_selected_source_does_not_raise(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(common, "DATA_DIR", tmp_path)
 
-    app = Path(__file__).resolve().parents[1] / "ui" / "app.py"
+    app = Path(__file__).resolve().parents[1] / "ui" / "streamlit_app.py"
     at = AppTest.from_file(str(app), default_timeout=180)
     at.run()
     assert not at.exception

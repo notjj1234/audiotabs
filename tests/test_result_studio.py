@@ -365,6 +365,18 @@ def test_checklist_marks_a_skip_and_ignores_unknown_stages():
     assert "tempo" not in by_id
 
 
+def test_checklist_sets_fraction_on_active_stage():
+    rows = new_checklist()
+    rows = apply_progress(rows, "separate", "Isolating guitar stem", fraction=0.4)
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["separate"]["state"] == "active"
+    assert float(by_id["separate"]["fraction"]) == pytest.approx(0.4)
+    rows = apply_progress(rows, "separate", "Isolating guitar stem", fraction=0.7)
+    assert float(rows[1]["fraction"]) == pytest.approx(0.7)
+    rows = apply_progress(rows, "transcribe", "Detecting notes")
+    assert float(rows[2].get("fraction") or 0) == pytest.approx(0.05)
+
+
 def test_downloads_hide_missing_stem_and_unwritten_formats(tmp_path: Path):
     pdf = tmp_path / "transcription.pdf"
     midi = tmp_path / "transcription.mid"
@@ -376,6 +388,45 @@ def test_downloads_hide_missing_stem_and_unwritten_formats(tmp_path: Path):
     assert [item["key"] for item in items] == ["pdf", "midi", "tab"]
     assert downloads_after_run({"pdf": pdf}, failed=True) == []
     assert "musicxml" not in {item["key"] for item in items}
+
+
+def test_download_menu_includes_audience_subtitles(tmp_path: Path):
+    pdf = tmp_path / "transcription.pdf"
+    midi = tmp_path / "transcription.mid"
+    pdf.write_bytes(b"%PDF")
+    midi.write_bytes(b"MThd")
+    items = download_menu({"pdf": pdf, "midi": midi})
+    by_key = {item["key"]: item for item in items}
+    assert by_key["pdf"]["subtitle"] == "Printable chart"
+    assert by_key["midi"]["subtitle"] == "For DAWs"
+    assert by_key["pdf"]["label"] == "PDF"
+
+
+def test_listen_options_original_and_stem(tmp_path: Path):
+    from audio_to_tab.player_bar import listen_options
+
+    original = tmp_path / "playback.wav"
+    stem = tmp_path / "guitar_stem.wav"
+    original.write_bytes(b"RIFF")
+    stem.write_bytes(b"RIFF")
+    opts = listen_options({"playback": original, "guitar_stem": stem})
+    assert [o["key"] for o in opts] == ["original", "guitar_stem"]
+    assert [o["label"] for o in opts] == ["Original", "Guitar stem"]
+
+
+def test_listen_options_omit_missing_stem(tmp_path: Path):
+    from audio_to_tab.player_bar import listen_options
+
+    original = tmp_path / "playback.wav"
+    original.write_bytes(b"RIFF")
+    opts = listen_options({"playback": original, "guitar_stem": tmp_path / "missing.wav"})
+    assert [o["key"] for o in opts] == ["original"]
+
+
+def test_tab_pdf_wires_listen_options():
+    source = (Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py").read_text(encoding="utf-8")
+    assert "listen_options" in source
+    assert "tab_listen_source" in source
 
 
 def test_player_speed_keeps_quarter_speed():
@@ -494,14 +545,15 @@ def test_empty_transcription_writes_no_downloads(tmp_path: Path, monkeypatch):
 def test_page_keeps_current_guards_and_clears_failed_downloads():
     page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
     source = page.read_text(encoding="utf-8")
-    app = (page.parent / "app.py").read_text(encoding="utf-8")
+    app = (page.parent / "streamlit_app.py").read_text(encoding="utf-8")
     assert 'layout="wide"' in app
     assert "public YouTube links only" in source
     assert 'key="tab_separate_stems"' in source
     assert "Safer length (recommended)" in source
     assert "EmptyTranscriptionError" in source
     assert "carry_over_is_guitar_stem" not in source
-    assert "MusicXML" not in source
+    assert '"musicxml": ".musicxml"' in source
+    assert "MusicXML" in source
     assert "LilyPond" not in source
     assert "Chords" in source and "Piano roll" in source
     assert "record_failure" in source

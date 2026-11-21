@@ -41,3 +41,30 @@ def test_empty_transcription_message_lists_actions():
 def test_guitar_ft_cache_hint_mentions_ui_not_missing_cli():
     assert "audio-isolate" not in GUITAR_FT_CACHE_HINT
     assert "Tab PDF" in GUITAR_FT_CACHE_HINT or "Expert" in GUITAR_FT_CACHE_HINT
+
+
+def test_failure_kind_and_actions_table():
+    from audio_to_tab.ingest import YouTubeDownloadError
+    from audio_to_tab.pipeline import EmptyTranscriptionError
+    from audio_to_tab.user_errors import failure_actions, failure_kind
+
+    assert failure_kind(EmptyTranscriptionError("x")) == "empty"
+    assert failure_actions("empty") == ("solo_preset", "open_expert")
+    assert failure_kind(YouTubeDownloadError("blocked")) == "youtube"
+    assert failure_actions("youtube") == ("use_upload",)
+    assert failure_kind(RuntimeError("Guitar stem separation failed: boom")) == "separate"
+    assert failure_actions("separate") == ("retry_without_separation",)
+    assert failure_actions("generic") == ()
+
+
+def test_failure_ux_empty_keeps_solo_and_expert_actions():
+    source = _tab_pdf_source()
+    assert "solo_preset" in source or "tab_empty_solo" in source
+    assert "failure_kind" in source or "tab_pdf_failure_kind" in source
+
+
+def test_failure_ux_youtube_kind_has_upload_action_only():
+    from audio_to_tab.user_errors import failure_actions
+
+    assert failure_actions("youtube") == ("use_upload",)
+    assert "solo_preset" not in failure_actions("youtube")

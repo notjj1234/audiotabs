@@ -261,26 +261,26 @@ div[data-baseweb="input"] > div,
   justify-self: start !important;
   align-self: center !important;
 }}
-/* Browse files becomes a round muted plus; its label is hidden. */
+/* Hide Browse chrome; first grid cell carries one muted upload SVG (matches YT/URL). */
 .st-key-tab_source_entry [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"],
 .st-key-tab_source_entry [data-testid="stFileUploaderDropzone"] button {{
-  width: 2.5rem !important;
-  min-width: 2.5rem !important;
-  height: 2.5rem !important;
-  min-height: 2.5rem !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
   padding: 0 !important;
+  margin: 0 !important;
   border: 0 !important;
-  border-radius: 999px !important;
-  box-shadow: none !important;
-  color: transparent !important;
-  background:
-    linear-gradient(var(--studio-muted), var(--studio-muted)) center / 0.85rem 2px no-repeat,
-    linear-gradient(var(--studio-muted), var(--studio-muted)) center / 2px 0.85rem no-repeat,
-    color-mix(in srgb, var(--studio-text) 12%, transparent) !important;
+  overflow: hidden !important;
 }}
-.st-key-tab_source_entry [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] *,
-.st-key-tab_source_entry [data-testid="stFileUploaderDropzone"] button * {{
-  opacity: 0 !important;
+.st-key-tab_source_entry [data-testid="stFileUploaderDropzone"] > span {{
+  background-color: color-mix(in srgb, var(--studio-text) 12%, transparent) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5a.75.75 0 0 1 .75.75v5.19l1.72-1.72a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 0 1 1.06-1.06l1.72 1.72V2.25A.75.75 0 0 1 8 1.5zM3.5 10.5a.75.75 0 0 1 .75.75v1.5h7.5v-1.5a.75.75 0 0 1 1.5 0v2.25a.75.75 0 0 1-.75.75h-9a.75.75 0 0 1-.75-.75V11.25a.75.75 0 0 1 .75-.75z' fill='%239aa3b2'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: 1rem !important;
+  border-radius: 999px !important;
 }}
 .st-key-tab_source_entry [data-testid="stFileUploaderDropzoneInstructions"] {{
   display: flex !important;
@@ -440,28 +440,60 @@ div[data-baseweb="input"] > div,
     left: 1rem;
   }}
 }}
+.studio-converter-card,
+.st-key-tab_source_entry {{
+  width: min(40rem, 100%);
+  margin: 0 auto 1rem;
+  padding: 1rem 1.1rem 1.05rem;
+  background: var(--studio-panel);
+  border: 1px solid var(--studio-line);
+  border-radius: 12px;
+}}
+.st-key-tab_source_entry > [data-testid="stVerticalBlock"] {{
+  gap: var(--studio-stack) !important;
+}}
+.studio-converter-chip-name {{
+  margin: 0 0 0.2rem;
+  font-weight: 650;
+  color: var(--studio-text);
+}}
+.studio-converter-chip-meta {{
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  color: var(--studio-muted);
+}}
 .studio-hero {{
   background: transparent;
   border: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   padding: 0;
-  margin: 12vh auto 0;
+  margin: 12vh auto 2.25rem;
   max-width: 36rem;
 }}
 .studio-hero-icon {{
   display: block;
   width: 72px;
   height: 72px;
-  margin: 0 auto var(--studio-stack);
+  margin: 0 0 var(--studio-stack);
   border-radius: 14px;
   object-fit: contain;
   background: #fff;
 }}
-.studio-hero h1 {{
+.studio-hero-title {{
   margin: 0;
   font-size: 1.85rem;
   font-weight: 680;
   letter-spacing: -0.03em;
+  color: var(--studio-text) !important;
+  line-height: 1.2;
+}}
+/* No Streamlit heading-link affordance on the brand title. */
+.studio-hero [data-testid="stHeaderActionElements"],
+.studio-hero a[href^="#"] {{
+  display: none !important;
 }}
 .studio-run-title {{
   width: min(40rem, 100%);
@@ -502,6 +534,15 @@ div[data-baseweb="input"] > div,
   margin: 0;
   font-size: 1rem;
   font-weight: 650;
+  flex: 1;
+  min-width: 0;
+}}
+.studio-progress-elapsed {{
+  margin-left: auto;
+  color: var(--studio-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }}
 .studio-progress-bar {{
   height: 3px;
@@ -509,6 +550,12 @@ div[data-baseweb="input"] > div,
   border-radius: 999px;
   overflow: hidden;
   margin: 0 0 0.85rem;
+}}
+.studio-progress-tip {{
+  margin: -0.35rem 0 0.85rem;
+  color: var(--studio-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
 }}
 .studio-progress-bar span {{
   display: block;
@@ -574,6 +621,32 @@ div[data-baseweb="input"] > div,
 .studio-result-meta strong {{
   color: var(--studio-text);
   font-weight: 600;
+}}
+.studio-depth-banner {{
+  margin: 0 0 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--studio-accent) 28%, var(--studio-border));
+  background: color-mix(in srgb, var(--studio-accent) 8%, transparent);
+}}
+.studio-depth-banner-title {{
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: var(--studio-muted);
+  margin: 0 0 0.2rem;
+}}
+.studio-depth-banner-copy {{
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+  color: var(--studio-text);
+}}
+.studio-depth-banner-list {{
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--studio-muted);
+  font-size: 0.88rem;
 }}
 .studio-section-label {{
   margin: 0.85rem 0 0.35rem;
@@ -694,44 +767,254 @@ div[data-baseweb="input"] > div,
   width: min(36rem, 100%);
   margin: 0 auto;
   background: var(--studio-panel);
-  border: 1px solid var(--studio-line);
-  border-radius: 10px;
-  padding: 0.65rem 0.85rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--studio-text) 10%, transparent);
+  border-radius: 12px;
+  padding: 16px 16px 12px;
+  /* Streamlit applies st-key-* to the vertical block itself — zero that gap. */
+  gap: 0 !important;
 }}
-.st-key-tab_recent > [data-testid="stVerticalBlock"] {{
+.st-key-tab_recent [data-testid="stVerticalBlock"] {{
   gap: 0 !important;
 }}
 .studio-recent-heading {{
-  margin: 0 0 0.45rem;
+  margin: 0;
+  padding-bottom: 16px;
 }}
+/* Streamlit markdown uses margin-bottom:-16px; that ate the heading→confirm gap. */
+.st-key-tab_recent [data-testid="stElementContainer"]:has(.studio-recent-heading),
+.st-key-tab_recent [data-testid="stElementContainer"]:has(.studio-recent-heading) [data-testid="stMarkdown"],
+.st-key-tab_recent [data-testid="stElementContainer"]:has(.studio-recent-heading) [data-testid="stMarkdown"] > div,
+.st-key-tab_recent [data-testid="stElementContainer"]:has(.studio-recent-heading) [data-testid="stMarkdownContainer"] {{
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}}
+.studio-recent-heading-label,
 .studio-recent-heading h3 {{
   margin: 0;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-weight: 600;
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
   color: var(--studio-muted) !important;
 }}
 .st-key-tab_recent [data-testid="stHorizontalBlock"] {{
   align-items: center !important;
-  gap: 0.5rem !important;
-  min-height: 2.15rem;
-  padding: 0.35rem 0;
-  border-top: 1px solid var(--studio-line);
+  gap: 8px !important;
+  min-height: 36px;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--studio-text) 10%, transparent);
 }}
-.st-key-tab_recent [data-testid="stMarkdownContainer"] p {{
+div.st-key-tab_recent [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {{
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+}}
+div.st-key-tab_recent [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] > div {{
+  width: 100%;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+}}
+/* Row-only height lock — never apply to alerts/confirm markdown. */
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"]),
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"]),
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stMarkdown"],
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stCaption"],
+.st-key-tab_recent [data-testid="stHorizontalBlock"] .stMarkdown {{
+  height: 36px !important;
+  min-height: 36px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  line-height: 1 !important;
+}}
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stMarkdown"] > div,
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stCaption"] > div {{
+  height: 36px !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100%;
+  line-height: 1 !important;
+}}
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stMarkdownContainer"],
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stCaptionContainer"] {{
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  height: 36px !important;
+  width: 100%;
   margin: 0 !important;
-  font-size: 0.92rem !important;
-  line-height: 1.25 !important;
+  line-height: 1 !important;
 }}
-.st-key-tab_recent [data-testid="stCaptionContainer"] p {{
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stMarkdownContainer"] p {{
+  margin: 0 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.25 !important;
+  font-weight: 400 !important;
+}}
+.st-key-tab_recent [data-testid="stHorizontalBlock"] [data-testid="stCaptionContainer"] p {{
   margin: 0 !important;
   font-size: 0.75rem !important;
+  line-height: 1.25 !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--studio-muted) !important;
+}}
+/* React Aria checkbox (Streamlit 1.55+): center mark with title/buttons. */
+.st-key-tab_recent .stCheckbox,
+.st-key-tab_recent [data-testid="stCheckbox"] {{
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}}
+.st-key-tab_recent .stCheckbox label,
+.st-key-tab_recent [data-testid="stCheckbox"] label {{
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}}
+.st-key-tab_recent .stCheckbox [data-testid="stWidgetLabel"] {{
+  display: none !important;
+}}
+/* Visual box is the bare div sibling of the visually-hidden input span. */
+.st-key-tab_recent [data-testid="stCheckbox"] label > div:not([data-testid]) {{
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  margin: 0 !important;
+  border-radius: 4px !important;
+  border: 1px solid var(--studio-line) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  flex-shrink: 0 !important;
+}}
+.st-key-tab_recent [data-testid="stCheckbox"] label:has(input:checked) > div:not([data-testid]) {{
+  background: var(--studio-accent) !important;
+  border-color: var(--studio-accent) !important;
+}}
+.st-key-tab_recent [data-testid="stCheckbox"] label > div:not([data-testid]) svg {{
+  width: 12px !important;
+  height: 12px !important;
+  color: #111 !important;
 }}
 .st-key-tab_recent .stButton > button {{
-  min-height: 1.85rem !important;
-  padding: 0.2rem 0.7rem !important;
-  font-size: 0.8rem !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 12px !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  width: 100%;
+  border-radius: 8px !important;
+  background: transparent !important;
+  border-color: color-mix(in srgb, var(--studio-text) 12%, transparent) !important;
+  color: var(--studio-text) !important;
+  box-shadow: none !important;
+}}
+.st-key-tab_recent .stButton > button:hover {{
+  background: color-mix(in srgb, var(--studio-text) 6%, transparent) !important;
+  border-color: var(--studio-line) !important;
+}}
+.st-key-tab_recent [data-testid="stAlert"] {{
+  margin: 8px 0 4px !important;
+}}
+/* Delete confirm: natural alert height, no list-row chrome on Cancel/Delete.
+   Must beat `.st-key-tab_recent [data-testid=stVerticalBlock] {{ gap: 0 }}`. */
+.st-key-tab_recent_confirm,
+.st-key-tab_recent_confirm[data-testid="stVerticalBlock"],
+.st-key-tab_recent .st-key-tab_recent_confirm[data-testid="stVerticalBlock"] {{
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  margin-top: 0;
+}}
+.st-key-tab_recent_confirm [data-testid="stAlert"] {{
+  margin: 0 !important;
+  overflow: visible !important;
+  height: auto !important;
+}}
+.st-key-tab_recent_confirm [data-testid="stAlertContainer"] {{
+  display: flex !important;
+  align-items: center !important;
+  height: auto !important;
+  min-height: 48px !important;
+  max-height: none !important;
+  padding: 14px 16px !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}}
+.st-key-tab_recent_confirm [data-testid="stAlertContentWarning"] {{
+  display: flex !important;
+  align-items: center !important;
+  width: 100%;
+  margin: 0 !important;
+  padding: 0 !important;
+}}
+.st-key-tab_recent_confirm [data-testid="stElementContainer"]:has([data-testid="stAlert"]),
+.st-key-tab_recent_confirm [data-testid="stAlert"],
+.st-key-tab_recent_confirm [data-testid="stAlert"] > div,
+.st-key-tab_recent_confirm [data-testid="stAlert"] [data-testid="stMarkdown"],
+.st-key-tab_recent_confirm [data-testid="stAlert"] [data-testid="stMarkdown"] > div,
+.st-key-tab_recent_confirm [data-testid="stAlert"] [data-testid="stMarkdownContainer"],
+.st-key-tab_recent_confirm [data-testid="stAlert"] .stMarkdown {{
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  line-height: 1.4 !important;
+}}
+.st-key-tab_recent_confirm [data-testid="stAlert"] [data-testid="stMarkdownContainer"] p {{
+  margin: 0 !important;
+  line-height: 1.4 !important;
+  font-size: 0.875rem !important;
+}}
+.st-key-tab_recent_confirm [data-testid="stHorizontalBlock"] {{
+  border-top: none !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  align-items: stretch !important;
+}}
+.st-key-tab_recent_confirm [data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {{
+  min-height: 0 !important;
+}}
+.st-key-tab_recent_confirm .stButton > button {{
+  width: 100%;
+}}
+/* Single footer rule: border on the footer shell, not every nested columns row. */
+.st-key-tab_recent_footer {{
+  border-top: 1px solid color-mix(in srgb, var(--studio-text) 10%, transparent);
+  padding-top: 12px;
+  margin-top: 0;
+}}
+.st-key-tab_recent_footer [data-testid="stHorizontalBlock"] {{
+  border-top: none !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  min-height: 0 !important;
+}}
+.st-key-tab_recent_footer [data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"] {{
+  border-top: none !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+}}
+.st-key-tab_recent_footer .stButton > button {{
+  width: auto !important;
+  min-width: 0 !important;
 }}
 .st-key-tab_advanced_toggle {{
   width: min(36rem, 100%);
@@ -739,17 +1022,18 @@ div[data-baseweb="input"] > div,
 }}
 .st-key-tab_advanced_toggle button {{
   width: auto !important;
-  min-height: 1.85rem !important;
-  padding: 0.25rem 0.75rem !important;
-  font-size: 0.82rem !important;
-  color: var(--studio-muted) !important;
-  background: transparent !important;
-  border-color: transparent !important;
+  min-height: 2rem !important;
+  padding: 0.35rem 0.85rem !important;
+  font-size: 0.95rem !important;
+  font-weight: 550 !important;
+  color: var(--studio-text) !important;
+  background: var(--studio-panel) !important;
+  border-color: var(--studio-line) !important;
 }}
 .st-key-tab_advanced_toggle button:hover {{
   color: var(--studio-text) !important;
-  border-color: var(--studio-line) !important;
-  background: var(--studio-panel) !important;
+  border-color: color-mix(in srgb, var(--studio-accent) 45%, var(--studio-line)) !important;
+  background: color-mix(in srgb, var(--studio-accent) 5%, var(--studio-panel)) !important;
 }}
 .st-key-tab_advanced_panel {{
   width: min(36rem, 100%);
@@ -802,7 +1086,7 @@ div[data-baseweb="input"] > div,
     grid-template-columns: 1fr;
   }}
   .studio-result-header h2,
-  .studio-hero h1 {{
+  .studio-hero-title {{
     font-size: 1.45rem;
   }}
   .studio-rail {{

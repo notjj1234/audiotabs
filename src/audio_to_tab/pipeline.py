@@ -127,7 +127,7 @@ class PipelineConfig:
             raise ValueError(f"bars_per_line must be 1..8, got {self.bars_per_line}")
 
 
-ProgressCallback = Callable[[str, str], None]  # stage, message
+ProgressCallback = Callable[..., None]  # stage, message, optional fraction
 
 
 def _noop_progress(stage: str, message: str, fraction: float | None = None) -> None:
@@ -302,7 +302,10 @@ def run_pipeline(
             tempo_audio_source = stem_path
         elif cfg.separate_stems:
             separation_model = resolve_guitar_model(cfg.model, duration_sec)
-            progress("separate", "Separating stems")
+            separate_label = _separate_progress_label(
+                replace(cfg, model=separation_model)
+            )
+            progress("separate", separate_label, 0.05)
             stem_path = output_dir / "guitar_stem.wav"
             try:
                 recovery_diag_path = (
@@ -310,6 +313,10 @@ def run_pipeline(
                     if cfg.sub_bass_debleed or cfg.low_end_restore_db
                     else None
                 )
+
+                def _separate_progress(message: str, fraction: float) -> None:
+                    progress("separate", message or separate_label, fraction)
+
                 separate_guitar_stem(
                     work_audio,
                     stem_path,
@@ -333,6 +340,7 @@ def run_pipeline(
                         else None
                     ),
                     vocal_output=output_dir / "vocals.wav",
+                    on_progress=_separate_progress,
                 )
                 quality_diag = analyze_guitar_stem_quality(stem_path)
                 quality_diag.write_json(output_dir / "guitar_stem_quality.json")

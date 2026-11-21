@@ -57,6 +57,24 @@ def player_source_labels() -> list[str]:
     return labels
 
 
+def listen_options(artifacts: dict | None) -> list[dict]:
+    """Original and Guitar-stem listen rows when those WAV files exist."""
+    if not artifacts:
+        return []
+    options: list[dict] = []
+    for key, label, artifact_key in (
+        ("original", "Original", "playback"),
+        ("guitar_stem", "Guitar stem", "guitar_stem"),
+    ):
+        raw = artifacts.get(artifact_key)
+        if not raw:
+            continue
+        path = Path(str(raw))
+        if path.is_file():
+            options.append({"key": key, "label": label, "path": path})
+    return options
+
+
 def player_html(
     *,
     peaks: list[float],

@@ -43,12 +43,118 @@ def test_progress_card_html_renders_states():
     assert "Skipped" in html and "no vocal stem" in html
 
 
+def test_progress_card_omits_duplicate_label_detail():
+    from ui.studio_shell import progress_card_html
+
+    html = progress_card_html(
+        [{"state": "active", "label": "Loading audio", "detail": "Loading audio", "id": "ingest"}]
+    )
+    assert "Loading audio — Loading audio" not in html
+    assert "Loading audio" in html
+
+
+def test_progress_card_percent_rises_with_active_fraction():
+    from ui.studio_shell import progress_card_html
+    import re
+
+    low = progress_card_html(
+        [
+            {"id": "ingest", "state": "done", "label": "Loading audio", "detail": ""},
+            {
+                "id": "separate",
+                "state": "active",
+                "label": "Separating stems",
+                "detail": "Isolating",
+                "fraction": "0.1",
+            },
+        ]
+    )
+    high = progress_card_html(
+        [
+            {"id": "ingest", "state": "done", "label": "Loading audio", "detail": ""},
+            {
+                "id": "separate",
+                "state": "active",
+                "label": "Separating stems",
+                "detail": "Isolating",
+                "fraction": "0.8",
+            },
+        ]
+    )
+
+    def _pct(html: str) -> int:
+        match = re.search(r'aria-valuenow="(\d+)"', html)
+        assert match
+        return int(match.group(1))
+
+    assert _pct(high) > _pct(low)
+    assert _pct(high) < 100
+
+
+def test_format_elapsed_floors_and_clamps():
+    from audio_to_tab.progress_tips import format_elapsed
+
+    assert format_elapsed(-1) == "0:00"
+    assert format_elapsed(65.9) == "1:05"
+
+
+def test_progress_tip_for_known_and_unknown_stages():
+    from audio_to_tab.progress_tips import progress_tip_for
+
+    assert "solo guitar" in progress_tip_for("separate").lower()
+    assert progress_tip_for("tempo") == ""
+
+
+def test_progress_card_html_shows_elapsed_and_tip():
+    from ui.studio_shell import progress_card_html
+
+    html = progress_card_html(
+        [
+            {
+                "id": "separate",
+                "state": "active",
+                "label": "Separating stems",
+                "detail": "",
+                "fraction": "0.2",
+            }
+        ],
+        elapsed_sec=65.0,
+        tip="Full-band mixes take longer than clean solo guitar.",
+    )
+    assert "Elapsed 1:05" in html
+    assert "Full-band mixes take longer than clean solo guitar." in html
+    assert 'class="studio-progress-tip"' in html
+
+
+def test_progress_card_html_with_zero_elapsed_and_no_tip():
+    from ui.studio_shell import progress_card_html
+
+    html = progress_card_html(
+        [
+            {
+                "id": "ingest",
+                "state": "active",
+                "label": "Loading audio",
+                "detail": "",
+                "fraction": "0.05",
+            }
+        ],
+        elapsed_sec=0.0,
+        tip="",
+    )
+    assert "Elapsed 0:00" in html
+    assert "studio-progress-tip" not in html
+    assert "Loading audio" in html
+
+
 def test_hero_html_is_title_only():
     from ui.studio_shell import hero_html
 
     html = hero_html()
     assert "studio-hero" in html
-    assert "<h1>Tab PDF</h1>" in html
+    assert 'class="studio-hero-title"' in html
+    assert "Tab PDF" in html
+    assert "<h1>" not in html
     assert "<p>" not in html
     assert "studio-hero-icon" not in html
 
@@ -59,7 +165,9 @@ def test_hero_html_can_include_app_icon():
     html = hero_html(icon_data_uri="data:image/png;base64,AAA")
     assert 'class="studio-hero-icon"' in html
     assert "data:image/png;base64,AAA" in html
-    assert "<h1>Tab PDF</h1>" in html
+    assert 'class="studio-hero-title"' in html
+    assert "Tab PDF" in html
+    assert "<h1>" not in html
 
 
 def test_home_page_drops_experimental_note_and_info_banner():
@@ -103,7 +211,9 @@ def test_recent_conversions_heading_html():
 
     html = recent_conversions_heading_html()
     assert "studio-recent-heading" in html
+    assert "studio-recent-heading-label" in html
     assert "Recent conversions" in html
+    assert "<h3>" not in html
 
 
 def test_advanced_panel_heading_html():
@@ -112,6 +222,61 @@ def test_advanced_panel_heading_html():
     html = advanced_panel_heading_html()
     assert "studio-advanced-heading" in html
     assert "Advanced" in html
+
+
+def test_converter_card_and_source_chip_wiring():
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    assert ".studio-converter-card" in css
+    assert "st-key-tab_source_entry" in css
+    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "source_chip" in source
+    assert "format_source_chip_caption" in source
+    assert "studio-converter-chip-name" in source
+
+
+def test_entry_advanced_toggle_is_disclosure_without_duplicate_heading():
+    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert 'Advanced ▾"' in source or "Advanced ▾'" in source or 'f"Advanced ▾"' in source or '"Advanced ▾"' in source
+    assert "Advanced ▴" in source
+    assert "advanced_panel_heading_html()" not in source
+    assert '"Tab title"' in source
+    assert "format_func=_tuning_label" in source
+
+
+def test_advanced_controls_all_have_help_text():
+    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    panel = source[source.find('key="tab_advanced_panel"') : source.find('key="tab_recent"')]
+    for needle in (
+        'key="tab_max_duration_sec"',
+        'key="tab_trim_start_sec"',
+        'key="tab_full_track_confirm"',
+        'key="tab_guitar_engine"',
+        'key="tab_tempo_override"',
+        'key="tab_onset_threshold"',
+        'key="tab_frame_threshold"',
+    ):
+        assert needle in panel
+        chunk = panel[panel.find(needle) - 280 : panel.find(needle) + 80]
+        assert "help=" in chunk, f"missing help near {needle}"
+    assert "Length —" in panel
+    assert "Separation —" in panel
+    assert "Expert · transcription" in panel
+
+
+def test_advanced_toggle_css_reads_as_disclosure():
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    block = css[css.find(".st-key-tab_advanced_toggle button") :]
+    block = block[: block.find(".st-key-tab_advanced_panel")]
+    assert "0.95rem" in block or "font-size: 0.95rem" in block
+    assert "var(--studio-text)" in block
+    assert "var(--studio-line)" in block
 
 
 def test_player_html_uses_studio_tokens():
@@ -186,6 +351,9 @@ def test_hero_sits_on_the_ground():
     hero = css[css.find(".studio-hero {") :]
     block = hero[: hero.find("}")]
     assert "transparent" in block
+    assert "align-items: center" in block
+    assert ".studio-hero-title" in css
+    assert 'stHeaderActionElements' in css
 
 
 def test_studio_css_hides_streamlit_chrome():
@@ -299,7 +467,14 @@ def test_live_tab_pdf_has_no_streamlit_expanders():
     source = page.read_text(encoding="utf-8")
     assert "st.expander(" not in source
     assert "recent_conversions_heading_html" in source
-    assert 'list_recent_runs("tab_pdf", limit=5)' in source
+    assert "list_recent_runs(\"tab_pdf\", limit=_RECENT_FETCH)" in source
+    assert "_RECENT_FETCH = 20" in source
+    assert "_RECENT_VISIBLE = 3" in source
+    assert "tab_recent_expanded" in source
+    assert "Show more" in source
+    assert "Clear all" in source
+    assert "delete_run" in source and "delete_runs" in source
+    assert "tab_recent_confirm" in source
     assert "tab_show_advanced" in source
     assert 'key="tab_error_detail"' in source
 
@@ -309,9 +484,97 @@ def test_studio_css_styles_fixed_panels():
 
     css = studio_css()
     assert ".studio-recent-heading" in css
+    assert "text-transform: none" in css
+    assert "label > div:not([data-testid])" in css
+    assert ".st-key-tab_recent_footer" in css
     assert ".st-key-tab_advanced_panel" in css
     assert ".st-key-tab_advanced_toggle" in css
     assert 'data-testid="stExpander"' not in css
+
+
+def test_recent_list_css_centers_rows_and_has_one_footer_rule():
+    """Streamlit puts st-key-tab_recent on the vertical block itself, so gap must
+    be zeroed there. Nested footer columns must not inherit a second border-top.
+    """
+    from ui.studio_theme import studio_css
+
+    css = studio_css()
+    marker = ".st-key-tab_recent {"
+    recent_only = css[css.find(marker) + len(marker) :]
+    recent_only = recent_only[: recent_only.find("}")]
+    assert "gap: 0 !important" in recent_only
+
+    # One separator on the footer container; nested horizontal blocks stay borderless.
+    assert ".st-key-tab_recent_footer {" in css
+    nested = (
+        '.st-key-tab_recent_footer [data-testid="stHorizontalBlock"] '
+        '[data-testid="stHorizontalBlock"]'
+    )
+    assert nested in css
+    nested_block = css[css.find(nested) :]
+    nested_block = nested_block[: nested_block.find("}")]
+    assert "border-top: none" in nested_block or "border-top: 0" in nested_block
+
+
+def test_recent_confirm_css_escapes_row_height_lock():
+    """Delete confirm uses st.warning + columns; row 36px markdown locks must not
+    crush the alert or paint list borders on Cancel/Delete.
+    """
+    from ui.studio_theme import studio_css
+    from pathlib import Path
+
+    css = studio_css()
+    source = (Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'key="tab_recent_confirm"' in source
+    assert ".st-key-tab_recent_confirm" in css
+    assert '[data-testid="stAlertContainer"]' in css
+    # Alert markdown must be allowed to size naturally.
+    assert (
+        '.st-key-tab_recent_confirm [data-testid="stAlert"] '
+        '[data-testid="stMarkdownContainer"]'
+    ) in css or '.st-key-tab_recent_confirm [data-testid="stAlert"]' in css
+    confirm = css[css.find(".st-key-tab_recent_confirm") :]
+    assert "height: auto" in confirm
+    assert "border-top: none" in confirm
+    assert "gap: 12px !important" in confirm
+    # Center warning copy inside the gold box; space it under the heading.
+    assert "align-items: center" in confirm
+    assert '[data-testid="stAlertContentWarning"]' in css
+    heading = css[css.find(".studio-recent-heading {") :]
+    heading_block = heading[: heading.find("}")]
+    assert "padding-bottom: 16px" in heading_block
+    assert ':has(.studio-recent-heading)' in css
+    # Row height lock must not target bare recent markdown (alerts live there).
+    assert (
+        '.st-key-tab_recent [data-testid="stElementContainer"]:has('
+        '[data-testid="stMarkdownContainer"])'
+    ) not in css
+    assert (
+        '.st-key-tab_recent [data-testid="stHorizontalBlock"] '
+        '[data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"])'
+    ) in css
+
+
+def test_macos_dock_icon_has_transparent_margin():
+    """Dock icons need ~10% transparent inset so the tile matches system apps."""
+    from PIL import Image
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "assets" / "app-icon-dock.png"
+    assert path.is_file()
+    im = Image.open(path).convert("RGBA")
+    assert im.size == (1024, 1024)
+    px = im.load()
+    # Outer rim should be fully transparent (Apple icon grid margin).
+    for x, y in ((0, 0), (1023, 0), (0, 1023), (512, 0), (512, 1023), (0, 512)):
+        assert px[x, y][3] == 0, f"edge pixel {(x, y)} should be transparent"
+    # Squircle must not touch the canvas edge — mid-edge opaque means too large.
+    assert px[512, 40][3] == 0
+    assert px[40, 512][3] == 0
+    # Artwork still present in the center.
+    assert px[512, 512][3] > 200
 
 
 def test_entry_stack_uses_one_vertical_rhythm():
@@ -329,7 +592,8 @@ def test_entry_stack_uses_one_vertical_rhythm():
     assert "margin: 0 auto" in recent_block
     hero = css[css.find(".studio-hero {") :]
     hero_block = hero[: hero.find("}")]
-    assert "margin: 12vh auto 0" in hero_block
+    # Bottom margin keeps Tab PDF from sitting flush on the source controls.
+    assert "margin: 12vh auto 2.25rem" in hero_block
 
 
 def test_long_clip_player_mentions_tab_sync_unavailable():
@@ -370,11 +634,13 @@ def test_entry_screen_css_has_one_hierarchy():
     assert "display: grid !important" in tile
     assert "grid-template-columns: 2.5rem minmax(0, 1fr) !important" in tile
     assert "align-self: center !important" in tile
-    # Upload plus matches muted icon treatment — no accent glyph at rest.
-    plus = tile[tile.find("stBaseButton-secondary") :]
-    plus = plus[: plus.find("stFileUploaderDropzoneInstructions")]
-    assert "linear-gradient(var(--studio-muted)" in plus
-    assert "linear-gradient(var(--studio-accent)" not in plus
+    # Browse chrome is hidden; one muted upload SVG icon (not a +) matches YT/URL.
+    browse = tile[tile.find("stBaseButton-secondary") :]
+    browse = browse[: browse.find("stFileUploaderDropzoneInstructions")]
+    assert "visibility: hidden" in browse or "display: none" in browse
+    assert "linear-gradient(var(--studio-muted)" not in browse
+    assert "data:image/svg+xml" in tile
+    assert "linear-gradient(var(--studio-accent)" not in browse
     # Segment selection must not reflow: reserved 1px transparent border + inset chrome.
     assert "border: 1px solid transparent !important" in tile
     assert "box-shadow: inset 0 0 0 1px" in tile
@@ -452,7 +718,8 @@ def test_entry_shows_duration_and_guitar_caution():
     page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
     source = page.read_text(encoding="utf-8")
     assert "Best results: clean solo guitar" in source
-    assert "Duration about" in source
+    assert "format_youtube_duration(" in source
+    assert "studio-converter-chip-meta" in source
     assert 'key="tab_trim_start_sec"' in source
 
 
@@ -469,3 +736,23 @@ def test_tab_pdf_uses_guitar_ft_weights_cached_not_is_file():
     source = page.read_text(encoding="utf-8")
     assert "guitar_ft_weights_cached()" in source
     assert "guitar_ft_weights_path().is_file()" not in source
+
+
+def test_tab_pdf_phase_c_depth_wiring():
+    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
+    source = page.read_text(encoding="utf-8")
+    assert "depth_banner_actions" in source
+    assert "depth_banner_html" in source
+    assert "suggest_capo_for_key" in source
+    assert "get_accuracy_feedback" in source
+    assert "set_accuracy_feedback" in source
+    assert "MusicXML — Soon" not in source  # MusicXML is a real download now
+    assert "write_musicxml" in source or "musicxml" in source
+    assert "Basic Pitch" in source
+    assert "Demucs" in source
+    assert "Guitar-FT" in source
+    assert 'key="tab_accuracy_yes"' in source
+    assert 'key="tab_try_capo"' in source
+    from ui.studio_theme import studio_css
+
+    assert ".studio-depth-banner" in studio_css()

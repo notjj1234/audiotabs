@@ -54,8 +54,9 @@ def main() -> None:
         min_duration_sec=args.min_duration,
     )
 
-    def progress(stage: str, msg: str) -> None:
-        print(f"[{stage}] {msg}")
+    def progress(stage: str, msg: str, fraction: float | None = None) -> None:
+        suffix = f" ({fraction:.0%})" if fraction is not None else ""
+        print(f"[{stage}] {msg}{suffix}")
 
     artifacts = run_pipeline(
         audio_path=args.audio,

@@ -13,9 +13,6 @@ output/
 # OS
 .DS_Store
 
-# Node (build-time only)
-node_modules/
-
 # Models / large artifacts
 *.wav
 *.pt
@@ -33,3 +30,13 @@ dist/
 .ruff_cache/
 .streamlit/credentials.toml
 .cursor/
+
+# Node
+node_modules/
+
+# graphify generated output
+graphify-out/
+
+# Local tooling artifacts
+.impeccable/
+.superpowers/
