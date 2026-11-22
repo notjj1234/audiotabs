@@ -1,18 +1,25 @@
-/* Tokens — the single source of truth for the visual system (see DESIGN.md).
-   No component styles here; components keep their own scoped CSS. */
+/* Tokens — Audio Tools HOME_* world (see DESIGN.md). */
 
 @font-face {
-  font-family: 'Instrument Sans';
-  src: url('/fonts/instrument-sans-var.woff2') format('woff2');
-  font-weight: 400 700;
+  font-family: 'Satoshi';
+  src: url('/fonts/satoshi/Satoshi-Regular.woff2') format('woff2');
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 @font-face {
-  font-family: 'Instrument Serif';
-  src: url('/fonts/instrument-serif-400.woff2') format('woff2');
-  font-weight: 400;
+  font-family: 'Satoshi';
+  src: url('/fonts/satoshi/Satoshi-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/fonts/satoshi/Satoshi-Bold.woff2') format('woff2');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -26,16 +33,18 @@
 }
 
 :root {
-  --bg: #0f1115;
-  --surface: #171a21;
-  --surface-2: #1d2129;
-  --line: #2a2f3a;
-  --text: #e8eaef;
-  --muted: #9aa3b2;
-  --accent: #e8a317;
+  --bg: #192542;
+  --surface: #2a4467;
+  --surface-2: #35557c;
+  --line: #a8b8cc;
+  --text: #f4f7fb;
+  --text-secondary: #d5deea;
+  --muted: #b7c3d4;
+  --accent: #f6ad49;
   --accent-ink: #1a1305;
   --danger: #e5534b;
   --ok: #4ea36a;
+  --art: #142033;
 
   --fs-1: 12px;
   --fs-2: 13px;
@@ -49,8 +58,9 @@
   --lh-4: 26px;
   --lh-5: 32px;
   --lh-6: 40px;
-  --weight-regular: 450;
-  --weight-semibold: 620;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 500;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -61,15 +71,21 @@
   --space-12: 48px;
   --space-16: 64px;
 
-  --radius-1: 6px;
-  --radius-2: 10px;
+  --radius-1: 4px;
+  --radius-2: 8px;
   --radius-3: 14px;
 
-  --font-ui: 'Instrument Sans', system-ui, sans-serif;
-  --font-display: 'Instrument Serif', Georgia, serif;
+  --content-max: 1180px;
+  --shadow-transport: 0 -8px 24px rgba(0, 0, 0, 0.18);
+
+  --font-ui: 'Satoshi', system-ui, sans-serif;
+  --font-display: 'Satoshi', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  --motion: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion: var(--duration-fast) var(--ease-out);
 }
 
 *,
@@ -94,6 +110,12 @@ body {
   font-size: var(--fs-3);
   font-weight: var(--weight-regular);
   line-height: var(--lh-3);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text);
 }
 
 button,
@@ -109,12 +131,66 @@ textarea {
   outline-offset: 2px;
 }
 
+.rise-in {
+  animation: rise-in var(--duration-base) var(--ease-out) both;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.primary .spinner {
+  border-color: color-mix(in srgb, var(--accent-ink) 35%, transparent);
+  border-top-color: var(--accent-ink);
+}
+
+.spinner.is-on {
+  display: inline-block;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes home-bar-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0s !important;
     scroll-behavior: auto !important;
+  }
+
+  .rise-in {
+    animation: none;
   }
 }
