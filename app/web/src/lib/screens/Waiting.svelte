@@ -85,7 +85,7 @@
     border: 1px solid color-mix(in srgb, var(--line) 10%, transparent);
     border-radius: var(--radius-2);
     padding: var(--space-8);
-    text-align: center;
+    text-align: left;
   }
   h1 {
     font-size: var(--fs-5);
@@ -120,8 +120,7 @@
     flex-direction: column;
     gap: var(--space-3);
     text-align: left;
-    max-width: 320px;
-    margin-inline: auto;
+    max-width: 480px;
   }
   .stage {
     display: flex;
