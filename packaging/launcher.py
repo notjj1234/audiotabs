@@ -1,9 +1,7 @@
-"""Desktop launcher: native window over a local app server.
+"""Desktop launcher: native window over the local FastAPI + Svelte app.
 
-Dev-only entry point (`make desktop`). The web UI runs ``app.server``
-(FastAPI) or, behind ``--ui streamlit``, the legacy Streamlit app; either
-way the child process serves 127.0.0.1 and the parent process owns the
-native pywebview window.
+Dev-only entry point (`make desktop`). Starts ``python -m app.server`` on
+127.0.0.1 and opens a pywebview window with the launch token in the URL hash.
 """
 
 from __future__ import annotations
@@ -20,11 +18,10 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-APP = REPO_ROOT / "ui" / "app.py"
 PORTS = tuple(range(8501, 8511))
 WINDOW_SIZE = (1280, 860)
 WINDOW_MIN_SIZE = (960, 640)
-WINDOW_TITLE = "Tab PDF"
+WINDOW_TITLE = "Audio Tabs"
 HEALTH_TIMEOUT_SEC = 180.0
 HEALTH_POLL_SEC = 0.3
 
@@ -37,7 +34,6 @@ def window_icon() -> str | None:
     if sys.platform.startswith("win"):
         path = ico if ico.is_file() else png
     elif sys.platform == "darwin":
-        # Full-bleed squircles look oversized next to system apps; use inset asset.
         path = dock if dock.is_file() else (png if png.is_file() else ico)
     else:
         path = png if png.is_file() else ico
@@ -49,15 +45,6 @@ def log(message: str) -> None:
 
 
 def port_free(port: int) -> bool:
-    """Return False when something already accepts connections on 127.0.0.1:port.
-
-    A bind()+SO_REUSEADDR probe is wrong on Windows: it can succeed while an
-    older Streamlit is still listening, so the desktop window opens the stale
-    server (cached imports / missing symbols) instead of the one we just started.
-
-    Connect is the reliable signal: immediate accept => busy. Refused or a
-    localhost timeout (common on some Windows stacks for closed ports) => free.
-    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.35)
         try:
@@ -78,11 +65,11 @@ def pick_port() -> int:
     raise RuntimeError(
         f"No free port in {PORTS[0]}-{PORTS[-1]} "
         f"(already accepting connections: {busy}). "
-        "Close the other Tab PDF / Streamlit window and try again."
+        "Close the other Audio Tabs window and try again."
     )
 
 
-def health_ok(port: int, path: str = "/_stcore/health") -> bool:
+def health_ok(port: int, path: str = "/api/health") -> bool:
     try:
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}{path}", timeout=1.5
@@ -93,7 +80,7 @@ def health_ok(port: int, path: str = "/_stcore/health") -> bool:
 
 
 def wait_until_healthy(
-    port: int, server: subprocess.Popen, path: str = "/_stcore/health"
+    port: int, server: subprocess.Popen, path: str = "/api/health"
 ) -> bool:
     deadline = time.monotonic() + HEALTH_TIMEOUT_SEC
     while time.monotonic() < deadline:
@@ -104,39 +91,6 @@ def wait_until_healthy(
             return False
         time.sleep(HEALTH_POLL_SEC)
     return False
-
-
-def streamlit_command(port: int) -> list[str]:
-    return [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(APP),
-        "--server.address=127.0.0.1",
-        f"--server.port={port}",
-        "--server.headless=true",
-        "--server.fileWatcherType=none",
-        "--server.runOnSave=false",
-        "--browser.gatherUsageStats=false",
-        "--browser.serverAddress=127.0.0.1",
-        "--client.toolbarMode=minimal",
-    ]
-
-
-def start_server(port: int) -> subprocess.Popen:
-    env = os.environ.copy()
-    env["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
-    env["STREAMLIT_SERVER_HEADLESS"] = "true"
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(REPO_ROOT / "src"), str(REPO_ROOT), env.get("PYTHONPATH", "")]
-    )
-    return subprocess.Popen(
-        streamlit_command(port),
-        cwd=str(REPO_ROOT),
-        env=env,
-        stdin=subprocess.DEVNULL,
-    )
 
 
 def build_web_url(port: int, token: str) -> str:
@@ -162,12 +116,13 @@ def start_web_server(port: int, token: str) -> subprocess.Popen:
 
 
 def parse_ui(argv: list[str] | None = None) -> str:
-    parser = argparse.ArgumentParser(description="Tab PDF desktop launcher")
+    """Kept for tests/compat; web is the only front end."""
+    parser = argparse.ArgumentParser(description="Audio Tabs desktop launcher")
     parser.add_argument(
         "--ui",
-        choices=("streamlit", "web"),
-        default="streamlit",
-        help="front end to serve (default: streamlit until M2)",
+        choices=("web",),
+        default="web",
+        help="front end to serve (web only)",
     )
     return parser.parse_args(argv).ui
 
@@ -184,7 +139,6 @@ def stop_server(server: subprocess.Popen | None) -> None:
 
 
 def _warn_if_ffmpeg_missing() -> None:
-    """Non-fatal startup probe — UI also gates Convert when ffmpeg is missing."""
     import shutil
 
     if shutil.which("ffmpeg"):
@@ -200,10 +154,7 @@ def _warn_if_ffmpeg_missing() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    use_web = parse_ui(argv) == "web"
-    if not use_web and not APP.is_file():
-        log(f"Missing Streamlit entrypoint: {APP}")
-        return 1
+    parse_ui(argv)  # validate flags
     try:
         import webview
     except ImportError:
@@ -212,19 +163,12 @@ def main(argv: list[str] | None = None) -> int:
 
     _warn_if_ffmpeg_missing()
     port = pick_port()
-    if use_web:
-        token = secrets.token_urlsafe(32)
-        log(f"Starting web server on 127.0.0.1:{port}")
-        server = start_web_server(port, token)
-        health_path = "/api/health"
-        window_url = build_web_url(port, token)
-    else:
-        log(f"Starting Streamlit on 127.0.0.1:{port}")
-        server = start_server(port)
-        health_path = "/_stcore/health"
-        window_url = f"http://127.0.0.1:{port}"
+    token = secrets.token_urlsafe(32)
+    log(f"Starting web server on 127.0.0.1:{port}")
+    server = start_web_server(port, token)
+    window_url = build_web_url(port, token)
     try:
-        if not wait_until_healthy(port, server, health_path):
+        if not wait_until_healthy(port, server, "/api/health"):
             log("Server never became healthy")
             return 1
         log(f"Opening native window -> {window_url}")

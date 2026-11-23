@@ -37,21 +37,18 @@ def test_ui_effective_separate_when_demucs_missing():
         assert effective is False
 
 
-def test_tab_pdf_page_solo_first_safer_duration_and_empty_midi_handling():
-    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
+def test_entry_wires_solo_first_safer_duration_and_stem_controls():
+    page = Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "screens" / "Entry.svelte"
     source = page.read_text(encoding="utf-8")
-    assert 'key="tab_separate_stems"' in source
-    assert 'st.session_state["tab_separate_stems"] = False' in source
-    assert "Safer length (recommended)" in source
-    assert 'key="tab_safer_length"' in source
-    assert "EmptyTranscriptionError" in source
+    assert "Safer length" in source
+    assert "saferLength" in source
     assert "Separate guitar stem" in source
+    assert "separateStems" in source
+    assert "maxDuration" in source
+    assert "max_duration_sec" in source
     # Standalone app has no Isolation carry-over path.
     assert "carry_over_is_guitar_stem" not in source
     assert "switch_page" not in source
-    # Duration lives in Advanced (merged length controls), not a duplicate Pro knob.
-    assert 'key="tab_max_duration_sec"' in source
-    assert 'Limit duration"' not in source
 
 
 def test_positions_for_open_e():

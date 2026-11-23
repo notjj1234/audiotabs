@@ -464,8 +464,8 @@
       <ul class="yt-hits">
         {#each ytHits as hit (hit.video_id)}
           <li>
-            <span>{hit.title}<small>{hit.channel} · {hit.duration_label}</small></span>
-            <button type="button" class="ghost" onclick={() => pickYt(hit)}>Use</button>
+            <span class="yt-hit-text" title={hit.title}>{hit.title}<small>{hit.channel} · {hit.duration_label}</small></span>
+            <button type="button" class="ghost yt-hit-use" onclick={() => pickYt(hit)}>Use</button>
           </li>
         {/each}
       </ul>
@@ -501,8 +501,8 @@
 
   .promise {
     text-align: left;
-    max-width: 42ch;
-    margin: 0 0 var(--space-8);
+    max-width: 36ch;
+    margin: 0 0 var(--space-6);
   }
 
   .promise h1 {
@@ -523,10 +523,10 @@
     background: var(--surface);
     border: 1px solid color-mix(in srgb, var(--line) 10%, transparent);
     border-radius: var(--radius-2);
-    padding: var(--space-6);
+    padding: var(--space-4);
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
+    gap: var(--space-4);
   }
 
   .tabs {
@@ -898,6 +898,8 @@
 
   .modal-card {
     width: min(560px, 100%);
+    min-width: 0;
+    max-height: calc(100dvh - 2 * var(--space-6));
     background: var(--surface);
     border: 1px solid color-mix(in srgb, var(--line) 10%, transparent);
     border-radius: var(--radius-3);
@@ -919,21 +921,36 @@
 
   .yt-form input {
     flex: 1;
+    min-width: 0;
   }
 
   .yt-hits {
     list-style: none;
     padding: 0;
-    max-height: 280px;
-    overflow: auto;
+    max-height: min(40vh, 320px);
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .yt-hits li {
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
     gap: var(--space-3);
     padding: var(--space-3) 0;
     border-bottom: 1px solid color-mix(in srgb, var(--line) 22%, transparent);
+  }
+
+  .yt-hit-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .yt-hit-use {
+    flex: 0 0 auto;
   }
 
   .yt-hits small {

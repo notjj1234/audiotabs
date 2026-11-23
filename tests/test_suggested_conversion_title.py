@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ui.common import (
+from app.helpers.titles import (
     DEFAULT_CONVERSION_TITLE,
     is_default_conversion_title,
     maybe_autofill_conversion_title,

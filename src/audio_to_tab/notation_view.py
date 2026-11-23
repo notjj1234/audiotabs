@@ -10,14 +10,18 @@ from typing import Any
 
 from audio_to_tab.staff_wrap import wrap_tab_staff
 from audio_to_tab.tab_generate import TabDocument, TabEvent, TabNote, tab_to_ascii
+from audio_to_tab.tab_rhythm import beam_groups, snap_duration
 from audio_to_tab.tuning import midi_note_name
 
-TAB_MEASURE_WIDTH = 180
-TAB_ROW_HEIGHT = 96
+TAB_MEASURE_WIDTH = 240
+TAB_ROW_HEIGHT = 128
 TAB_ORIGIN_X = 40
-TAB_ORIGIN_Y = 28
-TAB_NOTE_INSET = 8
-TAB_NOTE_PAD = 28
+TAB_ORIGIN_Y = 44
+TAB_NOTE_INSET = 10
+TAB_NOTE_PAD = 32
+TAB_STEM_RISE = 26
+TAB_DARK_INK = "#f4f7fb"
+TAB_DARK_LINE = "#8fa0b5"
 PIANO_ORIGIN_X = 48
 
 
@@ -335,12 +339,77 @@ def score_playhead_html(svg: str, layout: dict[str, Any]) -> str:
 """
 
 
+def _event_span_sec(event: TabEvent) -> float:
+    if not event.notes:
+        return 0.25
+    return max(0.01, max(note.end for note in event.notes) - float(event.start))
+
+
+def _append_tab_rhythm(
+    parts: list[str],
+    *,
+    events: list[TabEvent],
+    x_positions: list[float],
+    top: float,
+    ink: str,
+    tempo_bpm: float,
+    beats_per_measure: int,
+) -> None:
+    """Songsterr-style stems/beams/flags above the staff; fret digits are the noteheads."""
+    if not events:
+        return
+    stem_bottom = top - 2
+    stem_top = top - TAB_STEM_RISE
+    values = [
+        snap_duration(_event_span_sec(event), tempo_bpm=tempo_bpm) for event in events
+    ]
+    groups = beam_groups(
+        events, tempo_bpm=tempo_bpm, beats_per_measure=beats_per_measure
+    )
+    beamed: set[int] = set()
+    for members in groups:
+        beamed.update(members)
+        flags = values[members[0]].flags
+        x0 = x_positions[members[0]]
+        x1 = x_positions[members[-1]]
+        for layer in range(max(1, flags)):
+            y = stem_top + layer * 4
+            parts.append(
+                f'<line class="tab-beam" data-rhythm="beam" x1="{x0:.1f}" y1="{y:.1f}" '
+                f'x2="{x1:.1f}" y2="{y:.1f}" stroke="{ink}" stroke-width="3" '
+                f'stroke-linecap="square"/>'
+            )
+
+    for index, value in enumerate(values):
+        x_note = x_positions[index]
+        if value.type_name != "whole":
+            parts.append(
+                f'<line class="tab-stem" data-rhythm="stem" x1="{x_note:.1f}" '
+                f'y1="{stem_bottom:.1f}" x2="{x_note:.1f}" y2="{stem_top:.1f}" '
+                f'stroke="{ink}" stroke-width="1.5"/>'
+            )
+        if index not in beamed and value.flags > 0:
+            for layer in range(value.flags):
+                y = stem_top + layer * 5
+                # Hook flag to the right of the stem tip.
+                parts.append(
+                    f'<path class="tab-flag" data-rhythm="flag" '
+                    f'd="M{x_note:.1f} {y:.1f} q6 3 6 8" fill="none" '
+                    f'stroke="{ink}" stroke-width="1.5"/>'
+                )
+        if value.dotted:
+            parts.append(
+                f'<circle cx="{x_note + 7:.1f}" cy="{stem_bottom - 6:.1f}" r="1.6" '
+                f'fill="{ink}"/>'
+            )
+
+
 def tab_staff_svg(
     doc: TabDocument,
     *,
     bars_per_line: int = 4,
-    ink: str = "#111",
-    line: str = "#222",
+    ink: str = TAB_DARK_INK,
+    line: str = TAB_DARK_LINE,
 ) -> str:
     """Notation staff: six lines, fret numbers, and one row per bars-per-line group."""
     layout = tab_playhead_layout(doc, bars_per_line=bars_per_line)
@@ -353,7 +422,8 @@ def tab_staff_svg(
     height = layout["height"]
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-        f'width="100%" role="img" aria-label="Guitar tab">',
+        f'width="100%" height="auto" preserveAspectRatio="xMidYMin meet" '
+        f'role="img" aria-label="Guitar tab">',
     ]
     labels = list(reversed(doc.tuning_names))
     for row_index, (row_start, row_end) in enumerate(rows):
@@ -374,18 +444,31 @@ def tab_staff_svg(
                     )
             m_start = measure_index * measure_sec
             m_end = m_start + measure_sec
+            measure_events: list[TabEvent] = []
+            measure_xs: list[float] = []
             for event in doc.events:
                 if event.start < m_start or event.start >= m_end:
                     continue
                 rel = (event.start - m_start) / measure_sec
                 x_note = x + TAB_NOTE_INSET + rel * (measure_width - TAB_NOTE_PAD)
+                measure_events.append(event)
+                measure_xs.append(x_note)
                 for note in event.notes:
                     y_note = top + (5 - note.string) * 12
                     parts.append(
-                        f'<text x="{x_note:.1f}" y="{y_note}" font-size="12" '
+                        f'<text x="{x_note:.1f}" y="{y_note}" font-size="15" '
                         f'dominant-baseline="central" font-weight="700" fill="{ink}">'
                         f"{int(note.fret)}</text>"
                     )
+            _append_tab_rhythm(
+                parts,
+                events=measure_events,
+                x_positions=measure_xs,
+                top=top,
+                ink=ink,
+                tempo_bpm=float(doc.tempo_bpm) if doc.tempo_bpm else 120.0,
+                beats_per_measure=max(1, int(doc.beats_per_measure)),
+            )
             parts.append(
                 f'<text x="{x}" y="{top + 78}" font-size="11" fill="{ink}">{measure_index + 1}</text>'
             )
@@ -440,8 +523,8 @@ def piano_roll_svg(
     tempo_bpm: float,
     beats_per_measure: int,
     semitones: int = 0,
-    ink: str = "#111",
-    line: str = "#bbb",
+    ink: str = TAB_DARK_INK,
+    line: str = TAB_DARK_LINE,
 ) -> str:
     """Time against sounding pitch, with measure numbers."""
     shifted = [(int(pitch) + int(semitones), float(start), float(end)) for pitch, start, end in notes]
@@ -497,7 +580,7 @@ def chord_diagram_svg(
     name: str,
     frets: list[int | None] | tuple[int | None, ...],
     *,
-    ink: str = "#111",
+    ink: str = TAB_DARK_INK,
 ) -> str:
     """Six-string diagram. Fret 0 is open. None is a muted string."""
     values = list(frets[:6]) + [None] * (6 - len(list(frets[:6])))

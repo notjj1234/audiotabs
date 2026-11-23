@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ui import common
+from app.helpers import recent as common
 
 
 def _seed_run(data_dir: Path, *, title: str = "Guitar Tab") -> Path:

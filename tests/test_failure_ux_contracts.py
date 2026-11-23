@@ -1,4 +1,4 @@
-"""Source-contract locks for Tab PDF failure-mode UX (no Streamlit runtime)."""
+"""Failure-mode UX contracts against the web Entry screen + user_errors."""
 
 from __future__ import annotations
 
@@ -8,27 +8,20 @@ from audio_to_tab.pipeline import EMPTY_TRANSCRIPTION_MESSAGE
 from audio_to_tab.separate import GUITAR_FT_CACHE_HINT
 
 
-def _tab_pdf_source() -> str:
-    return (Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py").read_text(
-        encoding="utf-8"
-    )
+def _entry_source() -> str:
+    return (
+        Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "screens" / "Entry.svelte"
+    ).read_text(encoding="utf-8")
 
 
-def test_failure_ux_contract_strings_present():
-    source = _tab_pdf_source()
-    assert "ffmpeg is required for conversion" in source
-    assert "ffmpeg_install_hint" in source
-    assert "disabled=convert_disabled" in source or "disabled=not has_ffmpeg" in source or "convert_disabled" in source
-    assert "RoFormer limit on this machine" in source
-    assert "Use Demucs instead" in source
-    assert "Paste media URL" in source
-    assert "guitar_ft_weights_cached()" in source
-    assert 'key="tab_expert_options"' in source
-    assert "Solo / fingerstyle" in source
-    assert "tab_pdf_empty_recovery" in source
-    assert "user_facing_message" in source
-    assert "Best results: clean solo guitar" in source
-    assert 'key="tab_full_track_confirm"' in source
+def test_entry_wires_ffmpeg_gate_and_advanced_controls():
+    source = _entry_source()
+    assert "ffmpeg" in source
+    assert "Safer length" in source
+    assert "fullTrackConfirm" in source
+    assert "onset" in source
+    assert "YouTube" in source
+    assert "solo" in source and "full_mix" in source
 
 
 def test_empty_transcription_message_lists_actions():
@@ -55,12 +48,6 @@ def test_failure_kind_and_actions_table():
     assert failure_kind(RuntimeError("Guitar stem separation failed: boom")) == "separate"
     assert failure_actions("separate") == ("retry_without_separation",)
     assert failure_actions("generic") == ()
-
-
-def test_failure_ux_empty_keeps_solo_and_expert_actions():
-    source = _tab_pdf_source()
-    assert "solo_preset" in source or "tab_empty_solo" in source
-    assert "failure_kind" in source or "tab_pdf_failure_kind" in source
 
 
 def test_failure_ux_youtube_kind_has_upload_action_only():

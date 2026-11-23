@@ -1,23 +1,24 @@
 from pathlib import Path
 
-
-def test_execute_pending_enables_gp5_export():
-    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
-    source = page.read_text(encoding="utf-8")
-    assert "export_gp5=True" in source
+from app.server.jobs import JobManager
 
 
-def test_reopen_restores_pdf_details_from_meta():
-    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
-    source = page.read_text(encoding="utf-8")
-    reopen = source[source.find("def _reopen_run") : source.find("def _clear_failure_state")]
-    assert 'run.get("details")' in reopen or "run.get('details')" in reopen
-    assert "tab_pdf_details" in reopen
+def test_job_manager_enables_gp5_via_real_runner_contract():
+    # Jobs always request GP5 on the real pipeline path.
+    source = Path(__file__).resolve().parents[1] / "app" / "server" / "jobs.py"
+    text = source.read_text(encoding="utf-8")
+    assert "export_gp5=True" in text
 
 
 def test_write_run_metadata_accepts_details():
-    from ui.common import write_run_metadata
     import inspect
+
+    from app.server.store import write_run_metadata
 
     sig = inspect.signature(write_run_metadata)
     assert "details" in sig.parameters
+
+
+def test_job_manager_constructible(tmp_path):
+    manager = JobManager(tmp_path, runner=lambda **kwargs: {})
+    assert manager.get("missing") is None

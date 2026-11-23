@@ -23,11 +23,9 @@ def test_quick_setup_defaults_values():
     assert state["tab_safer_length"] is True
 
 
-def test_tab_pdf_wires_fingering_preference():
-    source = (Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py").read_text(
-        encoding="utf-8"
-    )
-    assert "tab_setup_fingering" in source
+def test_entry_wires_fingering_preference():
+    source = (
+        Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "screens" / "Entry.svelte"
+    ).read_text(encoding="utf-8")
+    assert "fingering" in source
     assert "fingering_preference" in source
-    assert "apply_quick_setup_defaults" in source
-    assert "tab_quick_setup_defaults" in source

@@ -49,29 +49,29 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-8);
+    gap: var(--space-6);
     max-width: var(--content-max);
     margin: 0 auto;
-    padding: var(--space-3) var(--space-8);
+    padding: var(--space-2) var(--gutter);
   }
 
   .brand-wrap {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
 
   .logo {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-2);
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-1);
     display: block;
     object-fit: cover;
     flex-shrink: 0;
   }
 
   .brand {
-    font-size: var(--fs-4);
+    font-size: var(--fs-3);
     font-weight: var(--weight-semibold);
     letter-spacing: -0.02em;
     color: var(--text);
@@ -85,13 +85,13 @@
 
   .nav-button {
     position: relative;
-    min-height: 44px;
-    padding: 0 var(--space-4);
+    min-height: 36px;
+    padding: 0 var(--space-3);
     border: 0;
-    border-radius: var(--radius-2);
+    border-radius: var(--radius-1);
     background: transparent;
     color: var(--muted);
-    font-size: var(--fs-3);
+    font-size: var(--fs-2);
     font-weight: var(--weight-medium);
     cursor: pointer;
     transition:

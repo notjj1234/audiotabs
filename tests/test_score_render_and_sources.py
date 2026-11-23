@@ -27,7 +27,7 @@ def test_chord_diagram_shipped_as_img():
 
 
 def test_active_source_uses_only_the_selected_tab():
-    from ui.tab_pdf import _active_source
+    from app.helpers.sources import active_source as _active_source
 
     path = Path("clip.mp3")
     youtube = "https://youtu.be/abcdefghijk"
@@ -52,7 +52,7 @@ def test_active_source_uses_only_the_selected_tab():
 
 
 def test_unique_chords_dedupes_by_name_and_frets():
-    from ui.tab_pdf import _unique_chords
+    from app.helpers.sources import unique_chords as _unique_chords
 
     hit = lambda name, frets: type("Hit", (), {"name": name, "frets": frets})()
     chords = [hit("C", [0, 1, 0, 2, 3, None]), hit("C", [0, 1, 0, 2, 3, None]), hit("G", [3, 2, 0, 0, 3, 3])]
@@ -77,41 +77,24 @@ def test_player_waveform_is_keyboard_focusable():
     assert "ArrowLeft" in html and "ArrowRight" in html
 
 
-def test_reopen_with_selected_source_does_not_raise(tmp_path, monkeypatch):
-    """Regression: Reopen wrote tab_pdf_title after the Title widget existed."""
-    import ui.common as common
-    from streamlit.testing.v1 import AppTest
+def test_reopen_run_is_available_via_api(tmp_path):
+    """Completed runs remain readable after Streamlit removal (API reopen)."""
+    from fastapi.testclient import TestClient
+
+    from app.server.main import create_app
+    from app.server.store import write_run_metadata
 
     run_dir = tmp_path / "run1"
     run_dir.mkdir()
     pdf = run_dir / "song.pdf"
     pdf.write_bytes(b"%PDF-1.4")
-    (run_dir / "meta.json").write_text(
-        json.dumps(
-            {
-                "page": "tab_pdf",
-                "title": "Saved Song",
-                "created_at": time.time(),
-                "artifacts": {"pdf": str(pdf)},
-            }
-        ),
-        encoding="utf-8",
+    write_run_metadata(
+        run_dir,
+        page="tab_pdf",
+        title="Saved Song",
+        artifacts={"pdf": str(pdf)},
     )
-    monkeypatch.setattr(common, "DATA_DIR", tmp_path)
-
-    app = Path(__file__).resolve().parents[1] / "ui" / "streamlit_app.py"
-    at = AppTest.from_file(str(app), default_timeout=180)
-    at.run()
-    assert not at.exception
-
-    # Pick the Media URL source and paste a direct media URL so the setup
-    # block (including the Title widget) is on screen — the old crash shape.
-    at.segmented_control(key="tab_source_tab").set_value("url").run()
-    assert not at.exception
-    at.text_input(key="tab_media_url_paste").set_value("https://cdn.example.com/song.mp3").run()
-    assert not at.exception
-
-    at.button(key=f"reopen_tab_{run_dir}").click()
-    at.run()
-    assert not at.exception
-    assert any("Saved Song" in (m.value or "") for m in at.markdown)
+    client = TestClient(create_app(data_dir=tmp_path, token="t"))
+    r = client.get("/api/runs/run1", headers={"X-Tab-Token": "t"})
+    assert r.status_code == 200
+    assert r.json()["title"] == "Saved Song"

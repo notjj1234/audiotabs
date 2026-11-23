@@ -27,26 +27,106 @@ export function getToken(): string | null {
   return token;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
+function authHeaders(init?: HeadersInit): Headers {
+  const headers = new Headers(init);
   const t = getToken();
   if (t) headers.set('X-Tab-Token', t);
-  const response = await fetch(path, { ...init, headers });
-  if (!response.ok) {
-    let code = 'request_failed';
-    let message = `${response.status} ${response.statusText}`.trim();
-    let hint: string | undefined;
-    let action: string | undefined;
-    try {
-      const body = await response.json();
-      if (typeof body?.code === 'string') code = body.code;
-      if (typeof body?.message === 'string') message = body.message;
-      if (typeof body?.hint === 'string') hint = body.hint;
-      if (typeof body?.action === 'string') action = body.action;
-    } catch {
-      // Non-JSON error body: keep the status-based message.
-    }
-    throw new ApiError(code, message, hint, action);
+  return headers;
+}
+
+async function raiseIfBad(response: Response): Promise<void> {
+  if (response.ok) return;
+  let code = 'request_failed';
+  let message = `${response.status} ${response.statusText}`.trim();
+  let hint: string | undefined;
+  let action: string | undefined;
+  try {
+    const body = await response.json();
+    const detail = body?.detail && typeof body.detail === 'object' ? body.detail : body;
+    if (typeof detail?.code === 'string') code = detail.code;
+    if (typeof detail?.message === 'string') message = detail.message;
+    if (typeof detail?.hint === 'string') hint = detail.hint;
+    if (typeof detail?.action === 'string') action = detail.action;
+  } catch {
+    // Non-JSON error body: keep the status-based message.
   }
+  throw new ApiError(code, message, hint, action);
+}
+
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = authHeaders(init.headers);
+  const response = await fetch(path, { ...init, headers });
+  await raiseIfBad(response);
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+export async function apiUpload(
+  file: File,
+): Promise<{ upload_id: string; name: string; bytes: number; duration_sec: number }> {
+  const body = new FormData();
+  body.append('file', file);
+  const response = await fetch('/api/uploads', {
+    method: 'POST',
+    headers: authHeaders(),
+    body,
+  });
+  await raiseIfBad(response);
+  return (await response.json()) as {
+    upload_id: string;
+    name: string;
+    bytes: number;
+    duration_sec: number;
+  };
+}
+
+export function audioUrl(runId: string, kind: 'original' | 'stem' = 'original'): string {
+  const t = getToken();
+  const q = new URLSearchParams({ kind });
+  // Token is sent via header for fetch; for <audio src> we rely on same-origin +
+  // cookie-less header is unavailable, so append token query only if needed.
+  // The server uses X-Tab-Token; browsers cannot set that on media elements.
+  // Workaround: fetch blob URLs in the player instead of raw src when possible.
+  void t;
+  return `/api/runs/${encodeURIComponent(runId)}/audio?${q.toString()}`;
+}
+
+/** Fetch a binary export with auth header. */
+export async function downloadExport(
+  runId: string,
+  payload: {
+    format: string;
+    tuning: string;
+    capo: number;
+    transpose: number;
+    bars: number;
+  },
+): Promise<void> {
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/export`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  await raiseIfBad(response);
+  const blob = await response.blob();
+  const disp = response.headers.get('content-disposition') || '';
+  const match = /filename="?([^"]+)"?/i.exec(disp);
+  const name = match?.[1] || `export.${payload.format}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Authenticated audio blob URL for <audio>. */
+export async function fetchAudioObjectUrl(
+  runId: string,
+  kind: 'original' | 'stem',
+): Promise<string> {
+  const response = await fetch(audioUrl(runId, kind), { headers: authHeaders() });
+  await raiseIfBad(response);
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }

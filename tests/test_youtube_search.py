@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from audio_to_tab.ingest import YouTubeSearchHit
-from ui.youtube_search import (
+from app.helpers.youtube_search import (
     PAGE_SIZE,
     hit_meta,
     hit_state,

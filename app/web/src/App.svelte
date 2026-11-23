@@ -22,6 +22,13 @@
     entryError = null;
   }
 
+  function failJob(message: string) {
+    // Do not call goEntry() — it clears entryError.
+    jobId = null;
+    screen = 'entry';
+    entryError = message;
+  }
+
   function startJob(id: string) {
     jobId = id;
     entryError = null;
@@ -41,7 +48,7 @@
     else screen = next;
   }}
 />
-<main class="content">
+<main class="content" class:result-tight={screen === 'result'}>
   {#if entryError && screen === 'entry'}
     <p class="banner" role="alert">{entryError}</p>
   {/if}
@@ -52,10 +59,7 @@
     <Waiting
       {jobId}
       ondone={(id) => openRun(id)}
-      onfail={(message) => {
-        entryError = message;
-        goEntry();
-      }}
+      onfail={failJob}
     />
   {:else if screen === 'result' && runId}
     <Result {runId} onnew={goEntry} />
@@ -66,12 +70,24 @@
 
 <style>
   .content {
+    width: 100%;
     max-width: var(--content-max);
-    margin: 0 auto;
-    padding: var(--space-12) var(--space-8) var(--space-16);
+    margin-left: auto;
+    margin-right: auto;
+    padding: var(--space-16) var(--gutter) var(--space-16);
     display: flex;
     flex-direction: column;
     align-items: stretch;
+    box-sizing: border-box;
+  }
+  .content.result-tight {
+    max-width: none;
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-6);
+    padding-left: var(--space-6);
+    padding-right: var(--space-6);
+    flex: 1;
+    min-height: calc(100vh - 56px);
   }
 
   .banner {

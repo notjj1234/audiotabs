@@ -1,10 +1,13 @@
-.PHONY: help install ui desktop test
+.PHONY: help install ui desktop test ui-build dev-api dev-web
 
 help:
-	@echo "install  pip install -e '.[dev,demucs]'"
-	@echo "ui       streamlit run ui/app.py"
-	@echo "desktop  native window (needs pip install -e '.[desktop]')"
-	@echo "test     pytest tests/ -q"
+	@echo "install   pip install -e '.[dev,demucs]'"
+	@echo "ui-build  npm build of app/web into dist"
+	@echo "dev-api   FastAPI on :8533"
+	@echo "dev-web   Vite dev server (proxies /api)"
+	@echo "ui        build web UI then remind how to run desktop"
+	@echo "desktop   native window over FastAPI + Svelte (default)"
+	@echo "test      pytest tests/ -q"
 
 install:
 	python -m pip install -e ".[dev,demucs]"
@@ -18,8 +21,8 @@ dev-api:
 dev-web:
 	cd app/web && npm run dev
 
-ui:
-	PYTHONPATH=src:. streamlit run ui/app.py
+ui: ui-build
+	@echo "Web UI built. Run: make desktop   (or make dev-api + make dev-web)"
 
 desktop:
 	PYTHONPATH=src:. python packaging/launcher.py

@@ -79,9 +79,9 @@ pip install -e ".[demucs,desktop,roformer,separator]"
 
 ## About
 
-- **Desktop** runs on this computer: Streamlit in `ui/`, started by `packaging/launcher.py`. No Docker.
-- **Website** is the hosted app: FastAPI in `backend/` plus the React app in `web/`.
+- **Desktop** runs on this computer: FastAPI + Svelte in `app/`, started by `packaging/launcher.py` (pywebview). No Docker.
 - **Shared engine** lives in `src/audio_to_tab/` (import as `audio_to_tab`).
+- Build the front end with `make ui-build` before `make desktop` if `app/web/dist` is missing.
 
 Python **3.11** (3.10–3.12 only). Desktop installers and the tester app: [DESKTOP.md](DESKTOP.md). Hosted deploy: [DEPLOY.md](DEPLOY.md).
 

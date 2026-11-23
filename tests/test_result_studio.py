@@ -176,15 +176,15 @@ def test_tab_playhead_layout_matches_staff_geometry():
     doc = _long_doc()
     layout = tab_playhead_layout(doc, bars_per_line=4)
     assert layout["measure_sec"] == pytest.approx(2.0)
-    assert layout["measure_width"] == 180
-    assert layout["row_height"] == 96
+    assert layout["measure_width"] == 240
+    assert layout["row_height"] == 128
     assert layout["bars_per_line"] == 4
     assert layout["measure_count"] == 10
     assert layout["row_count"] == 3
     assert layout["origin_x"] == 40
-    assert layout["origin_y"] == 28
-    assert layout["note_inset"] == 8
-    assert layout["note_span"] == 152  # measure_width - 28
+    assert layout["origin_y"] == 44
+    assert layout["note_inset"] == 10
+    assert layout["note_span"] == 208  # measure_width - 32
 
 
 def test_tab_staff_fret_numbers_centered_on_string_lines():
@@ -423,10 +423,18 @@ def test_listen_options_omit_missing_stem(tmp_path: Path):
     assert [o["key"] for o in opts] == ["original"]
 
 
-def test_tab_pdf_wires_listen_options():
-    source = (Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py").read_text(encoding="utf-8")
-    assert "listen_options" in source
-    assert "tab_listen_source" in source
+def test_result_wires_listen_options():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "web"
+        / "src"
+        / "lib"
+        / "screens"
+        / "Result.svelte"
+    ).read_text(encoding="utf-8")
+    assert "listen" in source.lower()
+    assert "original" in source.lower()
 
 
 def test_player_speed_keeps_quarter_speed():
@@ -542,23 +550,9 @@ def test_empty_transcription_writes_no_downloads(tmp_path: Path, monkeypatch):
     assert downloads_after_run({"pdf": out / "transcription.pdf"}, failed=True) == []
 
 
-def test_page_keeps_current_guards_and_clears_failed_downloads():
-    page = Path(__file__).resolve().parents[1] / "ui" / "tab_pdf.py"
-    source = page.read_text(encoding="utf-8")
-    app = (page.parent / "streamlit_app.py").read_text(encoding="utf-8")
-    assert 'layout="wide"' in app
-    assert "public YouTube links only" in source
-    assert 'key="tab_separate_stems"' in source
-    assert "Safer length (recommended)" in source
-    assert "EmptyTranscriptionError" in source
-    assert "carry_over_is_guitar_stem" not in source
-    assert '"musicxml": ".musicxml"' in source
-    assert "MusicXML" in source
-    assert "LilyPond" not in source
-    assert "Chords" in source and "Piano roll" in source
-    assert "record_failure" in source
+def test_record_failure_clears_failed_downloads():
     from audio_to_tab.pipeline import EmptyTranscriptionError
-    from ui.tab_pdf import record_failure
+    from app.helpers.sources import record_failure
 
     state = {"tab_pdf_artifacts": {"pdf": "old.pdf"}, "tab_pdf_flash": "done"}
     record_failure(state, EmptyTranscriptionError("A cleaner solo-guitar clip is needed."))

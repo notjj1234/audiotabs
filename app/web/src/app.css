@@ -47,17 +47,17 @@
   --art: #142033;
 
   --fs-1: 12px;
-  --fs-2: 13px;
-  --fs-3: 15px;
-  --fs-4: 18px;
-  --fs-5: 24px;
-  --fs-6: 34px;
+  --fs-2: 12px;
+  --fs-3: 14px;
+  --fs-4: 16px;
+  --fs-5: 20px;
+  --fs-6: 28px;
   --lh-1: 16px;
-  --lh-2: 18px;
-  --lh-3: 22px;
-  --lh-4: 26px;
-  --lh-5: 32px;
-  --lh-6: 40px;
+  --lh-2: 16px;
+  --lh-3: 20px;
+  --lh-4: 22px;
+  --lh-5: 26px;
+  --lh-6: 34px;
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 500;
@@ -75,7 +75,9 @@
   --radius-2: 8px;
   --radius-3: 14px;
 
-  --content-max: 1180px;
+  /* Narrow rail leaves calm navy margin in the 1280 window. */
+  --content-max: 800px;
+  --gutter: 48px;
   --shadow-transport: 0 -8px 24px rgba(0, 0, 0, 0.18);
 
   --font-ui: 'Satoshi', system-ui, sans-serif;
@@ -101,6 +103,7 @@
 html,
 body {
   height: 100%;
+  width: 100%;
 }
 
 body {
@@ -111,6 +114,14 @@ body {
   font-weight: var(--weight-regular);
   line-height: var(--lh-3);
   -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 ::selection {

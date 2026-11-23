@@ -21,8 +21,16 @@ def transcribe_audio(
     normalize: bool = True,
 ) -> Path:
     """Run Basic Pitch on audio and write cleaned MIDI."""
-    from basic_pitch import ICASSP_2022_MODEL_PATH
-    from basic_pitch.inference import predict
+    try:
+        from basic_pitch import ICASSP_2022_MODEL_PATH
+        from basic_pitch.inference import predict
+    except ModuleNotFoundError as exc:
+        if exc.name in {"pkg_resources", "setuptools"}:
+            raise RuntimeError(
+                "Transcription needs setuptools<81 (provides pkg_resources for resampy). "
+                'Reinstall with: python -m pip install "setuptools>=68,<81"'
+            ) from exc
+        raise
 
     audio_path = Path(audio_path)
     output_path = Path(output_midi_path)

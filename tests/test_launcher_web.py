@@ -57,15 +57,16 @@ def test_start_web_server_uses_module_entry(monkeypatch):
     assert cmd[1:3] == ["-m", "app.server"]
 
 
-def test_ui_flag_defaults_to_streamlit():
-    assert launcher.parse_ui([]) == "streamlit"
+def test_ui_flag_defaults_to_web():
+    assert launcher.parse_ui([]) == "web"
 
 
 def test_ui_flag_accepts_web():
     assert launcher.parse_ui(["--ui", "web"]) == "web"
-    assert launcher.parse_ui(["--ui", "streamlit"]) == "streamlit"
 
 
-def test_ui_flag_rejects_unknown():
+def test_ui_flag_rejects_streamlit_and_unknown():
+    with pytest.raises(SystemExit):
+        launcher.parse_ui(["--ui", "streamlit"])
     with pytest.raises(SystemExit):
         launcher.parse_ui(["--ui", "native"])

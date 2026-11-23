@@ -22,12 +22,3 @@ def test_depth_banner_actions_omit_unavailable(tmp_path: Path):
         has_midi=False,
     )
     assert [item["id"] for item in no_sep] == ["guitar_pro"]
-
-
-def test_depth_banner_html_empty_when_no_actions():
-    from ui.studio_shell import depth_banner_html
-
-    assert depth_banner_html([]) == ""
-    html = depth_banner_html([{"id": "piano_roll", "label": "Open piano roll"}])
-    assert "Go deeper" in html
-    assert "Open piano roll" in html

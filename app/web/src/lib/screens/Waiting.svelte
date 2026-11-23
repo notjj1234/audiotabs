@@ -27,21 +27,34 @@
   let snap = $state<JobSnap | null>(null);
   let started = $state(Date.now());
   let elapsed = $state(0);
+  let finished = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let poller: ReturnType<typeof setInterval> | undefined;
 
+  function stopPolling() {
+    finished = true;
+    if (timer) clearInterval(timer);
+    if (poller) clearInterval(poller);
+    timer = undefined;
+    poller = undefined;
+  }
+
   async function poll() {
+    if (finished) return;
     try {
       const next = await apiFetch<JobSnap>(`/api/jobs/${encodeURIComponent(jobId)}`);
       snap = next;
       if (next.state === 'done' && next.run_id) {
+        stopPolling();
         ondone(next.run_id);
         return;
       }
       if (next.state === 'failed') {
+        stopPolling();
         onfail(next.error?.message || next.message || 'Conversion failed.');
       }
     } catch (err) {
+      stopPolling();
       onfail(err instanceof Error ? err.message : 'Lost connection to the job.');
     }
   }
@@ -56,8 +69,7 @@
   });
 
   onDestroy(() => {
-    if (timer) clearInterval(timer);
-    if (poller) clearInterval(poller);
+    stopPolling();
   });
 </script>
 
