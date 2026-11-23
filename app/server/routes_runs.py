@@ -82,6 +82,7 @@ def api_run_score(
     capo: int | None = None,
     transpose: int | None = None,
     bars: int | None = None,
+    part: str | None = None,
 ) -> dict:
     from .score import build_score
 
@@ -93,6 +94,7 @@ def api_run_score(
         capo=capo,
         transpose=transpose,
         bars=bars,
+        part=part,
     )
 
 
@@ -140,11 +142,18 @@ def api_run_audio(
     kind: str = Query("original"),
 ) -> FileResponse:
     record = _require_run(request, run_id)
-    key = "guitar_stem" if kind == "stem" else "playback"
+    kind_key = (kind or "original").strip().lower()
+    key_map = {
+        "original": "playback",
+        "stem": "guitar_stem",
+        "lead": "lead_guitar",
+        "rhythm": "rhythm_guitar",
+    }
+    key = key_map.get(kind_key, "playback")
     path = record.artifacts.get(key)
     if path is None or not Path(path).is_file():
         # Original listen often uses playback; fall back
-        if kind == "original":
+        if kind_key == "original":
             path = record.artifacts.get("playback")
         if path is None or not Path(path).is_file():
             raise http_error(404, code="audio_missing", message="Audio not available for this run.")

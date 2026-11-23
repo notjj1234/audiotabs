@@ -1,12 +1,22 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
 
   import {
     apiFetch,
     downloadExport,
     fetchAudioObjectUrl,
+    type AudioKind,
   } from '../api';
+  import { shouldApplyAudioResult } from '../audioLoad';
   import TabPlayer from '../components/TabPlayer.svelte';
+  import {
+    defaultScorePart,
+    listenForPart,
+    parseScoreParts,
+    partLabel,
+    showPartSwitcher,
+    type ScorePart,
+  } from '../scoreParts';
 
   type ScoreLayout = {
     measure_sec: number;
@@ -41,6 +51,15 @@
     };
     layout?: ScoreLayout | null;
     artifacts: Record<string, boolean>;
+    part?: string;
+    parts?: string[];
+  };
+
+  type RunMeta = {
+    details?: {
+      lead_rhythm_fallback?: boolean;
+      lead_rhythm_fallback_reason?: string;
+    } | null;
   };
 
   let {
@@ -55,20 +74,42 @@
   let tuning = $state('Standard (EADGBE)');
   let capo = $state(0);
   let transpose = $state(0);
-  let bars = $state(2);
+  let bars = $state(4);
   let score = $state<Score | null>(null);
   let error = $state<string | null>(null);
-  let listen = $state<'original' | 'stem'>('original');
+  let part = $state<ScorePart>('lead');
+  let parts = $state<ScorePart[]>(['combined']);
+  let listen = $state<AudioKind>('original');
   let audioSrc = $state<string | null>(null);
+  let audioPending = $state(false);
   let confirmNew = $state(false);
   let exportOpen = $state(false);
   let panelOpen = $state(false);
+  let fallbackNotice = $state<string | null>(null);
+  let didInitialListenSync = false;
 
   let audioEl = $state<HTMLAudioElement | null>(null);
   let scoreEl = $state<HTMLDivElement | null>(null);
   let playing = $state(false);
   let playTime = $state(0);
   let audioDuration = $state(0);
+  // Non-reactive generation counter so $effect does not re-subscribe on bumps.
+  let audioLoadGen = 0;
+
+  async function loadRunMeta() {
+    try {
+      const meta = await apiFetch<RunMeta>(`/api/runs/${encodeURIComponent(runId)}`);
+      if (meta.details?.lead_rhythm_fallback) {
+        fallbackNotice =
+          meta.details.lead_rhythm_fallback_reason ||
+          'Lead/rhythm split was unavailable; showing a single guitar tab.';
+      } else {
+        fallbackNotice = null;
+      }
+    } catch {
+      fallbackNotice = null;
+    }
+  }
 
   async function loadScore() {
     try {
@@ -78,31 +119,72 @@
         capo: String(capo),
         transpose: String(transpose),
         bars: String(bars),
+        part,
       });
-      score = await apiFetch<Score>(`/api/runs/${encodeURIComponent(runId)}/score?${q}`);
+      const next = await apiFetch<Score>(`/api/runs/${encodeURIComponent(runId)}/score?${q}`);
+      score = next;
+      const parsed = parseScoreParts(next.parts);
+      parts = parsed;
+      if (next.part === 'lead' || next.part === 'rhythm' || next.part === 'combined') {
+        part = next.part;
+      } else {
+        part = defaultScorePart(parsed);
+      }
+      if (!didInitialListenSync) {
+        listen = listenForPart(part, next.artifacts);
+        didInitialListenSync = true;
+      }
       error = null;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Could not load score.';
     }
   }
 
-  async function loadAudio() {
-    if (audioSrc) URL.revokeObjectURL(audioSrc);
-    audioSrc = null;
-    try {
-      audioSrc = await fetchAudioObjectUrl(runId, listen);
-    } catch {
+  function selectPart(next: ScorePart) {
+    if (next === part) return;
+    part = next;
+    listen = listenForPart(next, score?.artifacts);
+  }
+
+  async function loadAudio(kind: AudioKind) {
+    // untrack: reading/writing audioSrc must not re-subscribe the listen effect
+    // (that loop nulls the blob forever and storms /audio with 200s).
+    const prev = untrack(() => audioSrc);
+    if (prev) URL.revokeObjectURL(prev);
+    audioLoadGen += 1;
+    const gen = audioLoadGen;
+    untrack(() => {
       audioSrc = null;
+      audioPending = true;
+    });
+    try {
+      const url = await fetchAudioObjectUrl(runId, kind);
+      if (!shouldApplyAudioResult(gen, audioLoadGen)) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      untrack(() => {
+        audioSrc = url;
+        audioPending = false;
+      });
+    } catch {
+      if (!shouldApplyAudioResult(gen, audioLoadGen)) return;
+      untrack(() => {
+        audioSrc = null;
+        audioPending = false;
+      });
     }
   }
 
   onMount(() => {
+    void loadRunMeta();
     void loadScore();
-    void loadAudio();
   });
 
   onDestroy(() => {
-    if (audioSrc) URL.revokeObjectURL(audioSrc);
+    audioLoadGen += 1;
+    const prev = untrack(() => audioSrc);
+    if (prev) URL.revokeObjectURL(prev);
   });
 
   $effect(() => {
@@ -111,15 +193,18 @@
     void capo;
     void transpose;
     void bars;
+    void part;
     void loadScore();
   });
 
+  // Depends only on listen (+ runId from props). loadAudio uses untrack for audioSrc.
   $effect(() => {
-    void listen;
+    const kind = listen;
+    void runId;
     playing = false;
     playTime = 0;
     audioDuration = 0;
-    void loadAudio();
+    void loadAudio(kind);
   });
 
   function togglePlay() {
@@ -169,6 +254,31 @@
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
+  });
+
+  // Keep the active staff row in view while playing so the tab moves with the song.
+  let followedRow = -1;
+  $effect(() => {
+    if (!playing) {
+      followedRow = -1;
+      return;
+    }
+    const layout = score?.layout;
+    if (!layout || !scoreEl || view !== 'staff') return;
+    const measureSec = layout.measure_sec > 0 ? layout.measure_sec : 1;
+    const barsPerLine = Math.max(1, layout.bars_per_line);
+    const measureIndex = Math.max(
+      0,
+      Math.min(layout.measure_count - 1, Math.floor(playTime / measureSec)),
+    );
+    const row = Math.floor(measureIndex / barsPerLine);
+    if (row === followedRow) return;
+    followedRow = row;
+    const reduce =
+      typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    scoreEl
+      .querySelector('.playhead')
+      ?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' });
   });
 
   $effect(() => {
@@ -234,6 +344,9 @@
   {#if error}
     <p class="banner" role="alert">{error}</p>
   {/if}
+  {#if fallbackNotice}
+    <p class="banner warn" role="status">{fallbackNotice}</p>
+  {/if}
 
   <header class="chrome">
     <div class="identity">
@@ -255,6 +368,18 @@
       {/each}
     </div>
   </header>
+
+  {#if showPartSwitcher(parts)}
+    <div class="parts" role="tablist" aria-label="Guitar part">
+      {#each parts as id}
+        <button
+          type="button"
+          class:active={part === id}
+          onclick={() => selectPart(id)}>{partLabel(id)}</button
+        >
+      {/each}
+    </div>
+  {/if}
 
   <div class="score-stage">
     <!-- Click-to-seek on the score surface; keyboard users get the same via the transport slider. -->
@@ -372,7 +497,15 @@
     <fieldset class="listen">
       <legend>Listen</legend>
       <label><input type="radio" bind:group={listen} value="original" /> Original</label>
-      <label><input type="radio" bind:group={listen} value="stem" /> Guitar stem</label>
+      {#if score?.artifacts.guitar_stem}
+        <label><input type="radio" bind:group={listen} value="stem" /> Guitar stem</label>
+      {/if}
+      {#if score?.artifacts.lead_guitar}
+        <label><input type="radio" bind:group={listen} value="lead" /> Lead</label>
+      {/if}
+      {#if score?.artifacts.rhythm_guitar}
+        <label><input type="radio" bind:group={listen} value="rhythm" /> Rhythm</label>
+      {/if}
     </fieldset>
     <audio
       bind:this={audioEl}
@@ -386,6 +519,7 @@
     ></audio>
     <TabPlayer
       available={audioSrc !== null}
+      pending={audioPending}
       {playing}
       currentTime={playTime}
       duration={audioDuration}
@@ -441,6 +575,26 @@
   .views button.active {
     background: var(--accent);
     color: var(--accent-ink);
+    font-weight: var(--weight-semibold);
+  }
+  .parts {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .parts button {
+    min-height: 40px;
+    padding: 0 var(--space-3);
+    border: 1px solid rgba(168, 184, 204, 0.35);
+    border-radius: var(--radius-1);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .parts button.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--text);
     font-weight: var(--weight-semibold);
   }
   .score-stage {
@@ -633,6 +787,10 @@
     background: var(--surface-2);
     border-radius: var(--radius-2);
     padding: var(--space-4);
+  }
+  .banner.warn {
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--text);
   }
   .muted {
     color: var(--muted);

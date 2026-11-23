@@ -34,6 +34,7 @@ from audio_to_tab.hardware import (
     roformer_max_audio_sec,
     resolve_desktop_speed,
     resolve_safe_device,
+    default_pipeline_device,
     separate_progress_message,
 )
 
@@ -259,6 +260,16 @@ def test_resolve_safe_device_downgrades_ineligible_mps():
     assert resolve_safe_device("mps", MPS_MAC) == "mps"
     low = HostProbe(cuda=False, mps=True, ram_gb=8.0)
     assert resolve_safe_device("mps", low) == "cpu"
+
+
+def test_default_pipeline_device_is_gpu_first():
+    """Web/desktop jobs should prefer GPU when the host offers it."""
+    assert default_pipeline_device(MPS_MAC, platform="darwin") == "mps"
+    assert default_pipeline_device(CUDA_HIGH, platform="win32") == "cuda"
+    assert default_pipeline_device(CPU_MID, platform="darwin") == "cpu"
+    # Low-RAM Mac with MPS advertised still falls back to CPU via resolve_safe_device.
+    low = HostProbe(cuda=False, mps=True, ram_gb=8.0)
+    assert default_pipeline_device(low, platform="darwin") == "cpu"
 
 
 def test_get_desktop_probe_without_torch_does_not_import_torch(monkeypatch):

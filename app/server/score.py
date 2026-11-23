@@ -20,8 +20,7 @@ from audio_to_tab.tuning import TUNING_PRESETS
 from .store import RunRecord
 
 
-def _load_result(record: RunRecord) -> dict:
-    path = record.artifacts.get("result")
+def _load_result_at(path: Path | None) -> dict:
     if path is None or not Path(path).is_file():
         return {}
     try:
@@ -29,6 +28,59 @@ def _load_result(record: RunRecord) -> dict:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _load_result(record: RunRecord) -> dict:
+    return _load_result_at(record.artifacts.get("result"))
+
+
+def available_parts(record: RunRecord) -> list[str]:
+    """Ordered part ids present for this run (always includes combined)."""
+    parts: list[str] = []
+    lead_midi = record.artifacts.get("lead_midi")
+    lead_result = record.artifacts.get("lead_result")
+    rhythm_midi = record.artifacts.get("rhythm_midi")
+    rhythm_result = record.artifacts.get("rhythm_result")
+    if (
+        lead_midi is not None
+        and Path(lead_midi).is_file()
+        and lead_result is not None
+        and Path(lead_result).is_file()
+    ):
+        parts.append("lead")
+    if (
+        rhythm_midi is not None
+        and Path(rhythm_midi).is_file()
+        and rhythm_result is not None
+        and Path(rhythm_result).is_file()
+    ):
+        parts.append("rhythm")
+    parts.append("combined")
+    return parts
+
+
+def resolve_part_paths(record: RunRecord, part: str | None) -> tuple[Path | None, Path | None]:
+    """Return (midi_path, result_path) for the requested part.
+
+    Unknown or missing parts fall back to combined.
+    """
+    requested = (part or "combined").strip().lower()
+    if requested == "lead":
+        midi = record.artifacts.get("lead_midi")
+        result = record.artifacts.get("lead_result")
+        if midi is not None and Path(midi).is_file() and result is not None and Path(result).is_file():
+            return Path(midi), Path(result)
+    elif requested == "rhythm":
+        midi = record.artifacts.get("rhythm_midi")
+        result = record.artifacts.get("rhythm_result")
+        if midi is not None and Path(midi).is_file() and result is not None and Path(result).is_file():
+            return Path(midi), Path(result)
+    midi = record.artifacts.get("midi")
+    result = record.artifacts.get("result")
+    return (
+        Path(midi) if midi is not None else None,
+        Path(result) if result is not None else None,
+    )
 
 
 def _lyric_lines(stored: dict) -> list[LyricLine]:
@@ -68,8 +120,28 @@ def build_score(
     capo: int | None = None,
     transpose: int | None = None,
     bars: int | None = None,
+    part: str | None = None,
 ) -> dict:
-    stored = _load_result(record)
+    parts = available_parts(record)
+    requested = (part or "").strip().lower()
+    if not requested:
+        # Default open part: lead when present, else combined.
+        resolved_part = "lead" if "lead" in parts else "combined"
+    elif requested in parts:
+        resolved_part = requested
+    else:
+        resolved_part = "combined"
+
+    midi_path, result_path = resolve_part_paths(record, resolved_part)
+    # If resolve fell back, reflect that in the response part id.
+    if resolved_part in ("lead", "rhythm"):
+        expected_midi = record.artifacts.get(f"{resolved_part}_midi")
+        if midi_path is None or expected_midi is None or Path(midi_path) != Path(expected_midi):
+            resolved_part = "combined"
+
+    stored = _load_result_at(result_path)
+    if not stored:
+        stored = _load_result(record)
     tuning_name = tuning or str(stored.get("tuning_name") or "Standard (EADGBE)")
     if tuning_name not in TUNING_PRESETS:
         tuning_name = "Standard (EADGBE)"
@@ -77,12 +149,11 @@ def build_score(
     transpose_i = int(stored.get("transpose") or 0) if transpose is None else int(transpose)
     bars_i = int(stored.get("bars_per_line") or 4) if bars is None else int(bars)
 
-    midi_path = record.artifacts.get("midi")
     tempo = float(stored.get("tempo_bpm") or 120.0)
     confidence = str(stored.get("tempo_confidence") or "high")
     duration = float(stored.get("duration_sec") or 0.0)
     beats = int(stored.get("beats_per_measure") or 4)
-    title = record.title or str(stored.get("title") or "Guitar Tab")
+    title = str(stored.get("title") or record.title or "Guitar Tab")
     song_key = str(stored.get("key") or "Unknown")
     lyrics_status = str(stored.get("lyrics_status") or "")
     lyric_lines = _lyric_lines(stored)
@@ -168,6 +239,8 @@ def build_score(
         "meta": meta,
         "layout": layout,
         "chords": chords_payload,
+        "part": resolved_part,
+        "parts": parts,
         "artifacts": {
             name: path.is_file() for name, path in sorted(record.artifacts.items())
         },

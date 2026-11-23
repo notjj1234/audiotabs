@@ -35,6 +35,26 @@ def _safe_name(name: str | None) -> str:
     return base
 
 
+def _lead_rhythm_available() -> bool:
+    """True when Mel-Band Lead/Rhythm split runtime is usable.
+
+    Mirror ``lead_rhythm_sep.is_lead_rhythm_split_available`` without importing
+    ``bs_roformer`` (its ``__init__`` pulls torch and can segfault on some
+    macOS numpy builds during light API probes). Check the mel-band module
+    file on ``sys.path`` instead of ``find_spec`` on the submodule.
+    """
+    import sys
+    from pathlib import Path
+
+    for entry in sys.path:
+        if not entry:
+            continue
+        mel = Path(entry) / "bs_roformer" / "mel_band_roformer.py"
+        if mel.is_file():
+            return True
+    return False
+
+
 @router.get("/api/capabilities")
 def api_capabilities() -> dict:
     # Use find_spec only — importing demucs/roformer can segfault on some macOS
@@ -50,6 +70,7 @@ def api_capabilities() -> dict:
         "demucs": demucs,
         "roformer": roformer,
         "guitar_ft": demucs,
+        "lead_rhythm": _lead_rhythm_available(),
         "max_upload_mb": MAX_UPLOAD_MB,
     }
 

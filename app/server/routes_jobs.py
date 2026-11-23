@@ -35,7 +35,10 @@ _ALLOWED_CONFIG = {
     "bleed_gate",
     "adaptive_fold_gain",
     "guitar_ensemble",
+    "demucs_device",
 }
+
+_DEVICES = frozenset({"cpu", "cuda", "mps"})
 
 _FINGERING = frozenset({"playable", "low_fret", "position"})
 
@@ -102,6 +105,23 @@ def _build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
 
     max_duration = raw.get("max_duration_sec")
     tempo = raw.get("tempo_bpm_override")
+
+    # GPU-first when the host can run it (Apple MPS / NVIDIA CUDA); else CPU.
+    from audio_to_tab.hardware import default_pipeline_device, resolve_safe_device
+
+    requested = raw.get("demucs_device")
+    if requested in (None, ""):
+        demucs_device = default_pipeline_device()
+    else:
+        demucs_device = str(requested)
+        if demucs_device not in _DEVICES:
+            raise http_error(
+                422,
+                code="bad_config",
+                message=f"demucs_device must be one of {sorted(_DEVICES)}, got {demucs_device!r}",
+            )
+        demucs_device = resolve_safe_device(demucs_device)
+
     config = SimpleNamespace(
         separate_stems=separate,
         mix_aware_filtering=mix_aware,
@@ -121,6 +141,7 @@ def _build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
         bleed_gate=bool(raw.get("bleed_gate")),
         adaptive_fold_gain=bool(raw.get("adaptive_fold_gain")),
         guitar_ensemble=bool(raw.get("guitar_ensemble")),
+        demucs_device=demucs_device,
         export_gp5=True,
         lead_rhythm_split=str(raw.get("model") or "") == "lead_rhythm_split",
         transpose=0,
@@ -133,6 +154,7 @@ def _build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
         "separate_stems": config.separate_stems,
         "mix_aware_filtering": config.mix_aware_filtering,
         "fingering_preference": config.fingering_preference,
+        "demucs_device": config.demucs_device,
         "preset": body.preset,
     }
     return config, meta

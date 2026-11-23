@@ -102,7 +102,54 @@ def test_job_rejects_unknown_config(client, tmp_path):
         headers=_headers(),
         json={
             "source": {"kind": "upload", "upload_id": upload_id},
-            "config": {"demucs_device": "cuda"},
+            "config": {"not_a_real_field": True},
         },
     )
     assert r.status_code == 422
+
+
+def test_job_accepts_demucs_device_and_defaults_gpu_first(client, tmp_path, monkeypatch):
+    from audio_to_tab.hardware import HostProbe
+
+    monkeypatch.setattr(
+        "audio_to_tab.hardware.get_desktop_probe",
+        lambda force=False: HostProbe(cuda=False, mps=True, ram_gb=16.0),
+    )
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF" + b"\x00" * 8)
+    with wav.open("rb") as handle:
+        up = client.post(
+            "/api/uploads",
+            headers=_headers(),
+            files={"file": ("clip.wav", handle, "audio/wav")},
+        )
+    upload_id = up.json()["upload_id"]
+
+    # Explicit override still accepted.
+    r = client.post(
+        "/api/jobs",
+        headers=_headers(),
+        json={
+            "source": {"kind": "upload", "upload_id": upload_id},
+            "title": "gpu job",
+            "config": {"demucs_device": "cpu"},
+        },
+    )
+    assert r.status_code == 202, r.text
+    snap = client.get(f"/api/jobs/{r.json()['job_id']}", headers=_headers())
+    assert snap.status_code == 200
+    assert snap.json()["config"]["demucs_device"] == "cpu"
+
+    # Omitted → GPU-first (MPS on this fake probe).
+    r2 = client.post(
+        "/api/jobs",
+        headers=_headers(),
+        json={
+            "source": {"kind": "upload", "upload_id": upload_id},
+            "title": "auto device",
+        },
+    )
+    assert r2.status_code == 202, r2.text
+    snap2 = client.get(f"/api/jobs/{r2.json()['job_id']}", headers=_headers())
+    assert snap2.status_code == 200
+    assert snap2.json()["config"]["demucs_device"] == "mps"

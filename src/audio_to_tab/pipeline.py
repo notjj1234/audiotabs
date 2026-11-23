@@ -360,17 +360,30 @@ def run_pipeline(
                 tempo_audio_source = stem_path
             progress("separate", "skipped: Separation is off")
 
+        lead_rhythm_fallback_reason: str | None = None
         if cfg.lead_rhythm_split:
-            return _run_lead_rhythm_stage(
-                cfg=cfg,
-                transcribe_input=transcribe_input,
-                tempo_audio_source=tempo_audio_source,
-                output_dir=output_dir,
-                tmp_path=tmp_path,
-                progress=progress,
-                duration_sec=duration_sec,
-                playback_path=playback_path,
-            )
+            try:
+                return _run_lead_rhythm_stage(
+                    cfg=cfg,
+                    transcribe_input=transcribe_input,
+                    tempo_audio_source=tempo_audio_source,
+                    output_dir=output_dir,
+                    tmp_path=tmp_path,
+                    progress=progress,
+                    duration_sec=duration_sec,
+                    playback_path=playback_path,
+                )
+            except lead_rhythm_sep.LeadRhythmSplitError as exc:
+                lead_rhythm_fallback_reason = str(exc)
+                logger.warning(
+                    "Lead/rhythm split failed; falling back to single guitar tab: %s",
+                    exc,
+                )
+                progress(
+                    "separate",
+                    "Lead/rhythm split failed; falling back to single guitar tab",
+                    0.25,
+                )
 
         # --- Transcribe ---
         progress("transcribe", "Detecting notes")
@@ -490,6 +503,16 @@ def run_pipeline(
             artifacts["tab_midi"] = tab_source_path
         if cfg.separate_stems and (output_dir / "guitar_stem.wav").exists():
             artifacts["guitar_stem"] = output_dir / "guitar_stem.wav"
+        if lead_rhythm_fallback_reason is not None:
+            fallback_path = output_dir / "lead_rhythm_fallback.json"
+            fallback_path.write_text(
+                json.dumps(
+                    {"fallback": True, "reason": lead_rhythm_fallback_reason},
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            artifacts["lead_rhythm_fallback"] = fallback_path
 
         return artifacts
 

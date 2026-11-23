@@ -37,6 +37,21 @@ def test_result_score_panel_uses_deeper_art_mix():
     assert "color-mix(in srgb, var(--art) 72%, var(--surface))" in source
 
 
+def test_result_defaults_to_four_bars_per_line():
+    """Practice default: 4 measures/line so fewer rows and less scroll."""
+    source = RESULT_SVELTE.read_text(encoding="utf-8")
+    assert "let bars = $state(4)" in source
+    assert "let bars = $state(2)" not in source
+
+
+def test_result_audio_load_avoids_effect_cycle():
+    """Listen $effect must not re-subscribe via audioSrc (infinite /audio storm)."""
+    source = RESULT_SVELTE.read_text(encoding="utf-8")
+    assert "untrack" in source
+    assert "shouldApplyAudioResult" in source
+    assert "audioPending" in source
+
+
 def test_result_score_is_immersive_with_floating_controls():
     source = RESULT_SVELTE.read_text(encoding="utf-8")
     assert 'class="score-stage"' in source or "score-stage" in source

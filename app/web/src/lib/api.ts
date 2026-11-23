@@ -80,7 +80,9 @@ export async function apiUpload(
   };
 }
 
-export function audioUrl(runId: string, kind: 'original' | 'stem' = 'original'): string {
+export type AudioKind = 'original' | 'stem' | 'lead' | 'rhythm';
+
+export function audioUrl(runId: string, kind: AudioKind = 'original'): string {
   const t = getToken();
   const q = new URLSearchParams({ kind });
   // Token is sent via header for fetch; for <audio src> we rely on same-origin +
@@ -123,7 +125,7 @@ export async function downloadExport(
 /** Authenticated audio blob URL for <audio>. */
 export async function fetchAudioObjectUrl(
   runId: string,
-  kind: 'original' | 'stem',
+  kind: AudioKind,
 ): Promise<string> {
   const response = await fetch(audioUrl(runId, kind), { headers: authHeaders() });
   await raiseIfBad(response);

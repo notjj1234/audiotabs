@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import threading
@@ -163,6 +164,7 @@ class JobManager:
                         frame_threshold=float(getattr(config, "frame_threshold", 0.3)),
                         tempo_bpm_override=getattr(config, "tempo_bpm_override", None),
                         model=str(getattr(config, "model", "htdemucs_6s")),
+                        demucs_device=str(getattr(config, "demucs_device", "cpu") or "cpu"),
                         guitar_refine=bool(getattr(config, "guitar_refine", False)),
                         guitar_checkpoint=getattr(config, "guitar_checkpoint", None),
                         low_end_restore_db=float(getattr(config, "low_end_restore_db", 0.0)),
@@ -171,6 +173,9 @@ class JobManager:
                         adaptive_fold_gain=bool(getattr(config, "adaptive_fold_gain", False)),
                         guitar_ensemble=bool(getattr(config, "guitar_ensemble", False)),
                         export_gp5=True,
+                        lead_rhythm_split=bool(getattr(config, "lead_rhythm_split", False)),
+                        transpose=int(getattr(config, "transpose", 0) or 0),
+                        bars_per_line=int(getattr(config, "bars_per_line", 4) or 4),
                     )
                 runner = run_pipeline
             artifacts = runner(
@@ -192,6 +197,18 @@ class JobManager:
                 "separate": config.separate_stems,
                 "lead_rhythm_split": config.lead_rhythm_split,
             }
+            fallback_art = artifacts.get("lead_rhythm_fallback") if isinstance(artifacts, dict) else None
+            if fallback_art is not None:
+                fb_path = Path(fallback_art)
+                if fb_path.is_file():
+                    try:
+                        payload = json.loads(fb_path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        payload = {}
+                    details["lead_rhythm_fallback"] = True
+                    reason = payload.get("reason") if isinstance(payload, dict) else None
+                    if reason:
+                        details["lead_rhythm_fallback_reason"] = str(reason)
             write_run_metadata(
                 output_dir,
                 page="tab_pdf",

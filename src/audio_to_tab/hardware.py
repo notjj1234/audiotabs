@@ -711,6 +711,23 @@ def lite_auto_device(
     return str(lite_auto_choice(probe, platform=platform, pressure=pressure)["device"])
 
 
+def default_pipeline_device(
+    probe: HostProbe | None = None,
+    *,
+    platform: str | None = None,
+) -> str:
+    """GPU-first device for pipeline / web jobs (mps → cuda → cpu), then safety-resolved.
+
+    Callers that omit ``probe`` pay for a one-time torch probe via
+    :func:`get_desktop_probe`. Prefer passing a probe in tests.
+    """
+    host = probe if probe is not None else get_desktop_probe()
+    return resolve_safe_device(
+        lite_auto_device(host, platform=platform),
+        host,
+    )
+
+
 def lite_device_plain_label(device: str) -> str:
     """Short device label for Lite UI (no MPS/CUDA jargon)."""
     if device == "mps":

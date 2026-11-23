@@ -1,11 +1,20 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   import { apiFetch, apiUpload, ApiError } from '../api';
+  import {
+    DEFAULT_ENTRY_PRESET,
+    defaultGuitarEngine,
+    engineForPreset,
+    type EntryPreset,
+  } from '../entryDefaults';
 
   type Caps = {
     ffmpeg: boolean;
     demucs: boolean;
     roformer: boolean;
     guitar_ft: boolean;
+    lead_rhythm?: boolean;
     max_upload_mb: number;
   };
 
@@ -29,15 +38,15 @@
   let title = $state('');
   let tuning = $state('Standard (EADGBE)');
   let capo = $state(0);
-  let preset = $state<'solo' | 'full_mix'>('solo');
+  let preset = $state<EntryPreset>(DEFAULT_ENTRY_PRESET);
   let fingering = $state('playable');
   let showAdvanced = $state(false);
   let saferLength = $state(true);
   let maxDuration = $state(90);
   let fullTrackConfirm = $state(false);
-  let separateStems = $state(false);
-  let guitarEngine = $state('htdemucs_6s');
-  let mixAware = $state(false);
+  let separateStems = $state(DEFAULT_ENTRY_PRESET === 'full_mix');
+  let guitarEngine = $state(defaultGuitarEngine(null));
+  let mixAware = $state(DEFAULT_ENTRY_PRESET === 'full_mix');
   let onset = $state(0.5);
   let frame = $state(0.3);
   let tempoOverride = $state(0);
@@ -78,15 +87,29 @@
 
   $effect(() => {
     void apiFetch<Caps>('/api/capabilities')
-      .then((c) => (caps = c))
+      .then((c) => {
+        caps = c;
+        guitarEngine = defaultGuitarEngine(c);
+      })
       .catch(() => {
-        caps = { ffmpeg: true, demucs: false, roformer: false, guitar_ft: false, max_upload_mb: 200 };
+        caps = {
+          ffmpeg: true,
+          demucs: false,
+          roformer: false,
+          guitar_ft: false,
+          lead_rhythm: false,
+          max_upload_mb: 200,
+        };
+        guitarEngine = defaultGuitarEngine(caps);
       });
   });
 
   $effect(() => {
     separateStems = preset === 'full_mix';
     mixAware = preset === 'full_mix';
+    // untrack current engine so this effect tracks preset/caps only.
+    const current = untrack(() => guitarEngine);
+    guitarEngine = engineForPreset(preset, current, caps);
   });
 
   async function uploadFile(file: File) {

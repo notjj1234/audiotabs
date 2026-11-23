@@ -189,17 +189,47 @@ def test_already_isolated_input_skips_prepass(tmp_path, monkeypatch):
     assert Path(artifacts["lead_guitar"]).is_file()
 
 
-def test_split_failure_propagates_without_fallback(tmp_path, monkeypatch):
+def _patch_single_guitar_transcription(monkeypatch, tmp_path):
+    """Mocks for the single-guitar path used after lead/rhythm soft-fallback."""
+
+    def fake_transcribe(_audio, destination, **_kwargs):
+        pm = pretty_midi.PrettyMIDI()
+        guitar = pretty_midi.Instrument(program=25)
+        for i, pitch in enumerate((60, 64, 67, 72)):
+            start = 0.1 + i * 0.3
+            guitar.notes.append(pretty_midi.Note(90, pitch, start, start + 0.2))
+        pm.instruments.append(guitar)
+        Path(destination).parent.mkdir(parents=True, exist_ok=True)
+        pm.write(str(destination))
+
+    def fake_cleanup(src, dest, config=None):
+        import shutil
+
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+
+    monkeypatch.setattr(pipeline, "transcribe_audio", fake_transcribe)
+    monkeypatch.setattr(pipeline, "cleanup_midi", fake_cleanup)
+
+
+def test_split_failure_soft_falls_back_to_single_guitar(tmp_path, monkeypatch):
     _patch_common(monkeypatch, tmp_path)
+    _patch_single_guitar_transcription(monkeypatch, tmp_path)
 
     def boom(*a, **k):
         raise RuntimeError("backend exploded")
 
     monkeypatch.setattr(lead_rhythm_sep, "run_lead_rhythm_split", boom)
-    with pytest.raises(RuntimeError, match="Lead/rhythm split failed"):
-        _run(tmp_path)
-    out_dir = tmp_path / "run"
-    assert not (out_dir / "transcription.tab").exists()
+    out_dir, artifacts = _run(tmp_path)
+    assert Path(artifacts["tab"]).is_file()
+    assert Path(artifacts["result"]).is_file()
+    assert "lead_midi" not in artifacts
+    fb = Path(artifacts["lead_rhythm_fallback"])
+    assert fb.is_file()
+    payload = json.loads(fb.read_text(encoding="utf-8"))
+    assert payload["fallback"] is True
+    assert "backend exploded" in payload["reason"]
+    assert (out_dir / "transcription.tab").exists()
 
 
 def test_both_stems_empty_raises(tmp_path, monkeypatch):
@@ -227,9 +257,9 @@ def test_defaults_unchanged_and_model_alias():
     assert aliased.lead_rhythm_split is True
 
 
-def test_split_error_not_double_prefixed(tmp_path, monkeypatch):
+def test_split_error_fallback_reason_not_double_prefixed(tmp_path, monkeypatch):
     _patch_common(monkeypatch, tmp_path)
-    _patch_transcriptions(monkeypatch, tmp_path)
+    _patch_single_guitar_transcription(monkeypatch, tmp_path)
 
     def already_wrapped(*a, **k):
         raise lead_rhythm_sep.LeadRhythmSplitError(
@@ -237,13 +267,19 @@ def test_split_error_not_double_prefixed(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(lead_rhythm_sep, "run_lead_rhythm_split", already_wrapped)
-    with pytest.raises(RuntimeError) as excinfo:
-        _run(tmp_path)
-    assert str(excinfo.value).startswith("Lead/rhythm split is not available.")
+    _, artifacts = _run(tmp_path)
+    reason = json.loads(Path(artifacts["lead_rhythm_fallback"]).read_text(encoding="utf-8"))[
+        "reason"
+    ]
+    assert reason.startswith("Lead/rhythm split is not available.")
+    assert reason.count("Lead/rhythm split failed") == 0
 
     def raw_error(*a, **k):
         raise ValueError("backend exploded")
 
     monkeypatch.setattr(lead_rhythm_sep, "run_lead_rhythm_split", raw_error)
-    with pytest.raises(RuntimeError, match="Lead/rhythm split failed: backend exploded"):
-        _run(tmp_path)
+    _, artifacts = _run(tmp_path)
+    reason = json.loads(Path(artifacts["lead_rhythm_fallback"]).read_text(encoding="utf-8"))[
+        "reason"
+    ]
+    assert reason == "Lead/rhythm split failed: backend exploded"

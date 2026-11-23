@@ -1,6 +1,7 @@
 <script lang="ts">
   let {
     available,
+    pending = false,
     playing,
     currentTime,
     duration,
@@ -8,6 +9,7 @@
     onseek,
   }: {
     available: boolean;
+    pending?: boolean;
     playing: boolean;
     currentTime: number;
     duration: number;
@@ -54,6 +56,8 @@
     />
     <span class="time">{fmt(currentTime)} / {fmt(duration)}</span>
   </div>
+{:else if pending}
+  <p class="muted"><span class="spinner is-on" aria-hidden="true"></span> Loading audio…</p>
 {:else}
   <p class="muted">Audio not available for this source.</p>
 {/if}
