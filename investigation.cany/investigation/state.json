@@ -1,0 +1,21 @@
+{
+  "revision": 11,
+  "brief": {
+    "question": "Plan (step 1 only, no edits): make Audio Tabs' tab viewer/player and audio→AI tab generation flow behave like an AI tab player (wrapping tab with rhythm/techniques, synced cursor, speed, A/B loop, metronome/count-in, original vs synth audio, per-track mute/solo, shortcuts), keeping the existing theme.",
+    "purpose": "Feature work on the person's own app",
+    "targets": [
+      "/Users/JJ/Documents/- PERSONAL PROJECTS GITHUB -/audiotabs"
+    ],
+    "constraints": [
+      "Existing theme tokens only",
+      "No new deps / schema changes / file deletes / upload+YouTube flow changes without asking",
+      "Step 1: explore and plan only, then wait for approval"
+    ],
+    "done_when": "Report with stack + file paths, theme, gap analysis, ordered plan delivered; person approves."
+  },
+  "plan": [],
+  "hypotheses": [],
+  "findings": [],
+  "handoff": "Round \"simple flow + fixes\" done on top of another session's instrument-parts work (analyses API, Instruments screen, convertFlow; uncommitted, branch rule: no commits). Changes: (1) separate.run_demucs_guitar_ft_inprocess now reads/writes with soundfile (no torchaudio/torchcodec → fixes 'Could not load libtorchcodec' with FFmpeg 9); demucs_bootstrap.save_audio 'rescale' now matches Demucs (only scales down when clipping) so quiet stems stay quiet for presence detection. Verified on an 8 s clip. (2) ingest: 'Requested format is not available' / 'no video formats' retry the next player client; ANSI codes stripped. (3) user_errors: plain message + short one-line detail (library-load and separation messages), YouTube 'Details:' split off; Waiting shows details in a collapsed 'Technical details' and analysis failures get 'Try again' (onretry). (4) Entry.svelte rewritten: only Upload / Search YouTube / Paste a link; choosing starts the analysis immediately (readyForDetection forces full_mix + separation). (5) Instruments.svelte: icon tiles, every detected instrument selected (Combined left off when Lead/Rhythm found), 'Not found' collapsed, 'Use the whole song' re-runs analysis without the 90 s limit, 'Tab settings' (tuning/capo/fingering/tempo/vocal de-bleed) applied via withTabOptions. App: direct_with_notice now sends separate_stems=false. Tests: pytest 522 pass, vitest 71, svelte-check 0/0, build OK, rebuild_check passes. Not seen in a live window; YouTube fix tested with mocks only.",
+  "updated": "2026-11-25T07:15:44Z"
+}

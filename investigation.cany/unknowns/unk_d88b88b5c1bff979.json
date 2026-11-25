@@ -1,0 +1,15 @@
+{
+  "id": "unk_d88b88b5c1bff979",
+  "revision": 1,
+  "question": "Lead/rhythm role thresholds and weights are all uncalibrated, and the older splitter still scores whole windows (first + last 90 s) instead of 8-bar segments with hysteresis. How well does it do on real songs?",
+  "severity": "medium",
+  "domain": "lead-rhythm",
+  "status": "open",
+  "probes": [
+    "Hand-label 30-50 segments from the app's catalogue as lead/rhythm/ambiguous and measure wrong-emit rate, then abstention",
+    "Fit ROLE_WEIGHTS (logistic regression) on those segments",
+    "Add 8-bar windowed scoring with two-window hysteresis to lead_rhythm.split_lead_rhythm_guitar"
+  ],
+  "evidence_for": [],
+  "evidence_against": []
+}

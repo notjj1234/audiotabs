@@ -1,0 +1,14 @@
+{
+  "id": "unk_4c5d2141b8cde6ec",
+  "revision": 2,
+  "question": "Bend and vibrato marks: the pipeline never produces them (lead_rhythm_tab.py says MIDI has no pitch-bend evidence). Show nothing, or is a pipeline change wanted?",
+  "severity": "medium",
+  "domain": "tab-data",
+  "status": "blocked",
+  "probes": [
+    "Ask the person whether to leave bend/vibrato blocked"
+  ],
+  "evidence_for": [],
+  "evidence_against": [],
+  "resolution": "Left out: the pipeline never saves bend or vibrato marks (lead_rhythm_tab.py), so the viewer draws only the saved ones (hammer-on, pull-off, slide, palm mute, harmonic). A test checks that bends are never drawn. Showing bends would need a pipeline change that detects pitch bends; that's for the person to decide."
+}

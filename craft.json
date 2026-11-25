@@ -1,0 +1,242 @@
+{
+  "version": 5,
+  "name": "audiotabs",
+  "request": "You're working in my app \"Audio Tabs\". Users either upload an audio file or find a song with the built-in YouTube search, and the app turns it into guitar tabs. I want the tab viewer/player, and the audio → AI tab generation flow behind it, to work like Songsterr's AI tab player, while keeping my app's existing look.\n\n<hard_constraints>\n- MUST keep the app's current colour palette, fonts, spacing scale and overall visual style. Reuse the existing theme tokens / CSS variables / design constants. NEVER add new colours, fonts or a new design system. Songsterr is the reference for layout and behaviour only, never for colours or branding.\n- NEVER copy Songsterr's logo, name, icons, assets or code into the app.\n- Only change files involved in tab generation, the tab viewer and the player. NEVER touch auth, billing, deployment/CI config, or unrelated screens.\n- Stop and ask me before you: add any dependency, change the database/storage schema, delete or rename any file, or change the existing upload or YouTube search flows.\n- Only build what's listed here. No extra features, refactors or abstractions.\n</hard_constraints>\n\n<step_1_explore_then_plan>\nBefore you write any code, read the codebase and report back:\n1. The stack, and where the current tab generation pipeline, tab data format and tab viewer live (file paths).\n2. Where the theme is defined (palette, fonts) and how components use it.\n3. A gap analysis: each feature in <target_behaviour>, marked exists / partial / missing.\n4. An implementation plan in ordered steps, listing the files to create or edit for each step, plus any new dependency (with the reason).\nThen STOP and wait for my approval. Don't edit any files in this step.\n</step_1_explore_then_plan>\n\n<target_behaviour>\nGeneration flow (Songsterr-style \"AI tab from audio\"):\n- From an uploaded file or a YouTube search result, a \"Generate tab\" action runs the existing transcription pipeline, shows step-by-step progress (e.g. separating stems → detecting notes → building tab) and opens the result in the viewer.\n- Generated tabs are clearly labelled as AI-generated. If the pipeline gives one transcription per stem/instrument, each becomes its own track.\n- Failures show a clear error message and a retry button. The app MUST NOT hang silently.\n\nTab viewer:\n- 6-line guitar tab rendered in measures, with measure numbers, time signature and tempo, and the tuning shown at the start (e.g. E A D G B E).\n- Rhythm shown under or above the tab (note durations), plus technique marks the data supports: hammer-on, pull-off, slide, bend, palm mute, vibrato.\n- Wrapping, continuous layout that resizes with the viewport and works on mobile widths.\n- Track selector to switch instruments/stems.\n\nPlayer:\n- Play/pause, plus a playhead cursor that highlights the current note/beat and auto-scrolls the tab to follow playback.\n- Click any measure or note to jump playback there.\n- Speed control (e.g. 25%–100%) without pitch change if the audio stack supports it.\n- A/B loop: select a range of measures and loop it.\n- Metronome toggle and count-in toggle.\n- Audio source toggle: original audio (uploaded file or YouTube audio) vs synthesized playback of the tab, both kept in sync with the cursor.\n- Per-track mute/solo.\n- Keyboard shortcuts: space = play/pause, plus keys for loop and speed. List them in a small help tooltip.\n</target_behaviour>\n\n<execution_rules>\n- After approval, build one plan step at a time. After each step output: ✅ [what was completed] + files changed.\n- After each step, run the existing tests/linter/build if they exist, and fix anything you broke before moving on.\n- Keep a checklist of the plan steps and update it as you go. Don't stop to summarise or offer next steps while items remain. Only stop when blocked, when a rule above says to ask, or when everything is done.\n- If the existing tab data format can't support a feature (e.g. no timing data for cursor sync), explain the gap and propose the smallest change. Don't invent data.\n</execution_rules>\n\n<done_when>\n- Generating from an uploaded file AND from a YouTube result both end with the tab open in the new viewer.\n- Every feature in <target_behaviour> works, or has been flagged to me as blocked with the reason.\n- Cursor sync stays aligned with the original audio within about one beat across a full song.\n- The viewer and player use only existing theme colours and fonts, and the rest of the app looks unchanged.\n- The build passes with no new errors or warnings.\nFinish with a short summary: what was built, files changed, anything blocked or left for later.\n</done_when>",
+  "target": {
+    "kind": "none"
+  },
+  "stack": "Builder's choice",
+  "status": "ready",
+  "note": "Ready: all 2 checks pass. 2 questions about the original are still open.",
+  "created_ms": 1795479342574,
+  "updated_ms": 1795590951419,
+  "checks": [
+    {
+      "round": 1,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795479589915
+    },
+    {
+      "round": 2,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795479695778
+    },
+    {
+      "round": 3,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795480592942
+    },
+    {
+      "round": 4,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795480653458
+    },
+    {
+      "round": 5,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795480710988
+    },
+    {
+      "round": 6,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795481040449
+    },
+    {
+      "round": 7,
+      "check": "build",
+      "passed": false,
+      "similarity": null,
+      "note": "Build failed: *** Error compiling './.venv311/lib/python3.11/site-packages/torch/testing/_internal/py312_intrinsics.py'...\nSyntaxError: expected '('",
+      "artifacts": [],
+      "at_ms": 1795481092351
+    },
+    {
+      "round": 8,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795481126949
+    },
+    {
+      "round": 8,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795481126983
+    },
+    {
+      "round": 9,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795481752510
+    },
+    {
+      "round": 9,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795481752549
+    },
+    {
+      "round": 10,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795481946839
+    },
+    {
+      "round": 10,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795481946876
+    },
+    {
+      "round": 11,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795513393058
+    },
+    {
+      "round": 11,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795513393096
+    },
+    {
+      "round": 12,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795514445311
+    },
+    {
+      "round": 12,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795514445352
+    },
+    {
+      "round": 13,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795514859456
+    },
+    {
+      "round": 13,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795514859519
+    },
+    {
+      "round": 14,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "`python3 -m compileall -q -f -x [\\\\/](\\.?venv|node_modules|\\.git)[\\\\/] .` passed.",
+      "artifacts": [],
+      "at_ms": 1795590932904
+    },
+    {
+      "round": 14,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: No module named pytest.",
+      "artifacts": [],
+      "at_ms": 1795590932953
+    }
+  ],
+  "agent_session": "606dafe1-14fa-4bb5-8da7-8feb162a2734",
+  "agent_session_by": "claude-code",
+  "agent_session_deep": true,
+  "capture_deep": true,
+  "allowed_actions": [],
+  "last_reply": "Applying the YouTube fix:YouTube fix is in and tested. Next, the long error messages. Reading where they're produced and shown:Error messages are fixed and tested. Now the screens. Reading the remaining pieces: the entry defaults and the waiting screen's failure and retry handling.Adding \"Try again\" for a failed instruments check and tucking technical details behind a toggle:Now the first screen. Checking which tests read the entry screen's source:Writing the new first screen: three choices, nothing else. Picking a source starts the instruments check straight away.Now the helper functions the new screen uses, plus the tab options the instruments page will apply:Now the instruments page. Checking the selection rules' tests, since \"everything detected is selected\" changes the current defaults:Now writing the instruments page with an icon for each instrument:The checkmark circle and the settings checkbox both use the class `check`, so they'd clash. Renaming the tile's to `tick`:Now wiring it together in the app shell:\n\n- The tab settings are shared, so they survive going back.\n- \"Use the whole song\" re-runs the instruments check.\n- A failed check can be retried.That script was blocked again, another false alarm. Making the same edits with the file editor:Type check is clean and all 66 front-end tests pass. Adding tests for the new helpers:All front-end tests pass. Checking that the pipeline really falls back when separation is wanted but no separator is installed:Now moving the settings contract tests to the instruments page, where the settings now live:One new lint note comes from my test, which nests two `with` blocks. Combining them into one:Lint is back to the pre-existing count. Running the project check:The first screen now shows only three choices: upload a file, search YouTube, or paste a link. Picking one goes straight to an instruments page that shows each detected instrument as an icon tile, all selected by default. Tab settings (tuning, capo and so on) sit in a small collapsible section on that page, alongside a \"Use the whole song\" button, since by default only the first 90 seconds are checked. One exception: \"Combined guitar\" starts unticked when Lead and Rhythm are found, because it's just those two merged.\n\nBoth errors from your screenshots are fixed:\n- **Separation crash:** the instrument separation no longer needs the FFmpeg library that was missing; I ran it on a short clip and it worked. While there I also fixed a bug that made near-silent instruments look loud.\n- **YouTube \"format not available\":** the download now tries other YouTube connections instead of giving up. This is only tested with simulated failures, not a real YouTube download.\n\nError messages are now one plain sentence with a \"Try again\" button, and the technical details are tucked behind a toggle.\n\nEverything builds and all tests pass, but I haven't seen the new screens in a running window. Try one upload and one YouTube song and tell me if anything looks off.",
+  "asset_budget_usd": 5.0,
+  "generate_assets": false,
+  "app_in_root": true,
+  "start_files": [
+    ".DS_Store",
+    ".cursor",
+    ".git",
+    ".gitignore",
+    ".impeccable",
+    ".pytest_cache",
+    ".python-version",
+    ".ruff_cache",
+    ".superpowers",
+    ".venv",
+    ".venv311",
+    "ANALYSIS.md",
+    "DESIGN.md",
+    "Makefile",
+    "PRODUCT.md",
+    "README.md",
+    "app",
+    "assets",
+    "cold-1440.png",
+    "data",
+    "docs",
+    "graphify-out",
+    "packaging",
+    "pyproject.toml",
+    "scripts",
+    "src",
+    "tests"
+  ]
+}
