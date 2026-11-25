@@ -24,7 +24,8 @@ evidence-omits rule.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import bisect
+from dataclasses import dataclass, field
 from itertools import pairwise
 from pathlib import Path
 
@@ -50,6 +51,22 @@ STRUM_MIN_FRAGMENTS = 3
 DEFAULT_ONSET_THRESHOLD = 0.5
 DEFAULT_FRAME_THRESHOLD = 0.3
 DEFAULT_MIN_NOTE_MS = 58.0
+
+# Three different pitches in one attack make a chord; two are a double-stop (lead vocabulary).
+CHORD_MIN_PITCHES = 3
+
+# Rhythm notes are transcribed from the combined guitar stem; a note leaves the rhythm part
+# only when the lead part has it and the lead stem holds at least this share of the two
+# stems' energy at its pitch. The split is too unreliable note by note for a lower cut-off
+# (GuitarSet harness: lower values dropped more comp notes than lead notes).
+LEAD_OWNED_SHARE = 0.9
+SHARE_WINDOW_SEC = 0.15
+SAME_NOTE_SEC = 0.06  # same pitch this close in both parts = one note (as the role check's bleed rule)
+
+# Semitones from a fundamental to its 2nd-6th and 8th harmonics. Basic Pitch reports these
+# partials of one (often distorted) note as extra notes, so an attack made only of them is one
+# note, not a chord. A fifth (7) is not a harmonic: root + fifth + octave stays a power chord.
+HARMONIC_INTERVALS = frozenset({12, 19, 24, 28, 31, 36})
 
 TECHNIQUE_KINDS = ("slide", "hammer_on", "pull_off", "bend", "vibrato", "palm_mute", "harmonic")
 
@@ -79,6 +96,9 @@ class StemTranscription:
     techniques: list[TechniqueMark]
     low_confidence_regions: list[tuple[float, float]]
     source_midi: Path
+    # Lead path only: attacks with >= CHORD_MIN_PITCHES distinct pitches, kept whole.
+    # Rhythm tends to play chords, so the role check may hand these to rhythm.
+    chord_attacks: list[list[StemNote]] = field(default_factory=list)
 
 
 def _load_notes(midi_path: Path) -> list[StemNote]:
@@ -140,10 +160,22 @@ def _energy_gate(
     return kept, dropped
 
 
+def _fundamental_of(group: list[StemNote]) -> StemNote:
+    """The loudest note, unless it is a harmonic of a lower note in the group: then that note."""
+    loudest = max(group, key=lambda n: (n.velocity, -n.pitch))
+    below = [n for n in group if (loudest.pitch - n.pitch) in HARMONIC_INTERVALS]
+    return min(below, key=lambda n: n.pitch) if below else loudest
+
+
+def _is_harmonic_stack(group: list[StemNote]) -> bool:
+    pitches = sorted({n.pitch for n in group})
+    return all((p - pitches[0]) in HARMONIC_INTERVALS for p in pitches[1:])
+
+
 def _lead_monophonic(
     notes: list[StemNote], window_sec: float = ONSET_WINDOW_SEC
 ) -> list[StemNote]:
-    """Keep the single highest-velocity note per onset window."""
+    """Keep one note per onset window: the loudest, or the fundamental it is a harmonic of."""
     if not notes:
         return []
     groups: list[list[StemNote]] = [[notes[0]]]
@@ -152,7 +184,110 @@ def _lead_monophonic(
             groups[-1].append(note)
         else:
             groups.append([note])
-    return [max(group, key=lambda n: (n.velocity, -n.pitch)) for group in groups]
+    return [_fundamental_of(group) for group in groups]
+
+
+def lead_chord_attacks(
+    notes: list[StemNote], window_sec: float = ONSET_WINDOW_SEC
+) -> list[list[StemNote]]:
+    """Attacks in the lead stem with >= CHORD_MIN_PITCHES distinct pitches (chords, not double-stops).
+
+    The monophonic lead path keeps only one note of each; these are kept whole so the
+    role check can give the chord to rhythm, which tends to play chords. An attack made
+    only of one note's harmonics is that single note, not a chord.
+    """
+    ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
+    groups: list[list[StemNote]] = []
+    for note in ordered:
+        if groups and note.start - groups[-1][0].start <= window_sec:
+            groups[-1].append(note)
+        else:
+            groups.append([note])
+    return [
+        g for g in groups if len({n.pitch for n in g}) >= CHORD_MIN_PITCHES and not _is_harmonic_stack(g)
+    ]
+
+
+def _cqt_by_pitch(audio_path: Path) -> np.ndarray:
+    """(frames, CQT_BINS) magnitudes, one semitone per bin from CQT_MIN_MIDI (vocal de-bleed grid)."""
+    import librosa
+
+    from audio_to_tab.vocal_debleed import ANALYSIS_SR, CQT_BINS, CQT_MIN_MIDI, HOP
+
+    y, _ = librosa.load(str(audio_path), sr=ANALYSIS_SR, mono=True)
+    if y.size == 0:
+        return np.zeros((0, CQT_BINS))
+    return np.abs(
+        librosa.cqt(
+            y,
+            sr=ANALYSIS_SR,
+            hop_length=HOP,
+            fmin=librosa.midi_to_hz(CQT_MIN_MIDI),
+            n_bins=CQT_BINS,
+            bins_per_octave=12,
+        )
+    ).T
+
+
+def lead_share_at_pitch(notes: list[StemNote], lead_stem: Path, rhythm_stem: Path) -> list[float]:
+    """Per note: the lead stem's share of both stems' energy at the note's pitch during its attack.
+
+    0.5 (no evidence) for pitches outside the CQT range or notes past the end of the stems.
+    """
+    from audio_to_tab.vocal_debleed import ANALYSIS_SR, CQT_BINS, CQT_MIN_MIDI, HOP
+
+    lead, rhythm = _cqt_by_pitch(Path(lead_stem)), _cqt_by_pitch(Path(rhythm_stem))
+    frames = min(len(lead), len(rhythm))
+    per_sec = ANALYSIS_SR / HOP
+    shares: list[float] = []
+    for n in notes:
+        b = n.pitch - CQT_MIN_MIDI
+        f0 = int(n.start * per_sec)
+        if not 0 <= b < CQT_BINS or f0 >= frames:
+            shares.append(0.5)
+            continue
+        f1 = max(f0 + 1, int((n.start + min(max(n.end - n.start, 0.05), SHARE_WINDOW_SEC)) * per_sec))
+        el = float(np.sum(lead[f0:f1, b] ** 2))
+        er = float(np.sum(rhythm[f0:f1, b] ** 2))
+        shares.append(el / (el + er) if el + er > 0 else 0.5)
+    return shares
+
+
+def _in_lead_part(note: StemNote, lead_starts: list[float], lead_sorted: list[StemNote]) -> bool:
+    """The lead part has this note, or this note is one of a lead note's harmonics."""
+    i = bisect.bisect_left(lead_starts, note.start - SAME_NOTE_SEC)
+    while i < len(lead_sorted) and lead_starts[i] <= note.start + SAME_NOTE_SEC:
+        interval = note.pitch - lead_sorted[i].pitch
+        if interval == 0 or interval in HARMONIC_INTERVALS:
+            return True
+        i += 1
+    return False
+
+
+def drop_lead_owned(
+    notes: list[StemNote],
+    lead_notes: list[StemNote],
+    lead_stem: Path,
+    rhythm_stem: Path,
+    threshold: float = LEAD_OWNED_SHARE,
+) -> tuple[list[StemNote], int]:
+    """Leave out notes the lead part already has, when the lead stem also owns their pitch.
+
+    A note the lead part does not have stays, so no note is lost from both parts (where the
+    split files rhythm playing as lead, the monophonic lead path can't take it).
+    Returns (kept, number left out).
+    """
+    if not notes or not lead_notes:
+        return list(notes), 0
+    lead_sorted = sorted(lead_notes, key=lambda n: n.start)
+    lead_starts = [n.start for n in lead_sorted]
+    shares = lead_share_at_pitch(notes, lead_stem, rhythm_stem)
+    kept = [
+        n
+        for n, share in zip(notes, shares, strict=True)
+        if share < threshold or not _in_lead_part(n, lead_starts, lead_sorted)
+    ]
+    return kept, len(notes) - len(kept)
 
 
 def _rhythm_chord_events(notes: list[StemNote]) -> list[list[StemNote]]:
@@ -397,7 +532,9 @@ def _transcribe_stem(
     )
     notes = _load_notes(out_midi)
     kept, dropped = _energy_gate(notes, Path(audio_path))
+    chord_attacks: list[list[StemNote]] = []
     if role == "lead":
+        chord_attacks = lead_chord_attacks(kept)
         kept = _lead_monophonic(kept)
     techniques = technique_marks_for(role, kept, audio_path=Path(audio_path))
     regions = [(max(0.0, n.start - 0.1), n.end + 0.1) for n in dropped]
@@ -407,6 +544,7 @@ def _transcribe_stem(
         techniques=techniques,
         low_confidence_regions=regions,
         source_midi=out_midi,
+        chord_attacks=chord_attacks,
     )
 
 

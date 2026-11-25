@@ -72,7 +72,8 @@ class LeadRhythmSplitError(RuntimeError):
 
 
 INSTALL_HINT = (
-    "Lead/Rhythm split requires the RoFormer runtime: pip install -e \".[roformer]\""
+    "Lead/Rhythm split needs torch, einops, beartype, rotary-embedding-torch and librosa: "
+    "pip install -e \".[demucs,roformer]\""
 )
 
 
@@ -113,8 +114,45 @@ def load_mbr_lead_rhythm_config(yaml_path: Path) -> dict:
 
 
 def is_lead_rhythm_split_available() -> bool:
-    """True when the installed bs_roformer runtime supports MelBand configs."""
-    return roformer._is_bs_melband_available()
+    """True when the bundled Mel-Band RoFormer code's dependencies are installed.
+
+    Checked with ``find_spec`` only, so torch is never imported by a probe.
+    """
+    import importlib.util
+
+    from audio_to_tab.vendor.mel_band_roformer import REQUIRED_MODULES
+
+    return all(importlib.util.find_spec(name) is not None for name in REQUIRED_MODULES)
+
+
+def build_lead_rhythm_model(config: dict, ckpt_path: Path, device):
+    """Build the bundled MelBandRoformer and load the checkpoint strictly.
+
+    Strict loading matters: a shape or key mismatch means the wrong architecture,
+    which would otherwise produce a silent garbage split.
+    """
+    import inspect
+
+    import torch
+
+    from audio_to_tab.vendor.mel_band_roformer.model import MelBandRoformer
+
+    params = inspect.signature(MelBandRoformer.__init__).parameters
+    model_cfg = {k: v for k, v in (config.get("model") or {}).items() if k in params}
+    for key in ("multi_stft_resolutions_window_sizes",):
+        if isinstance(model_cfg.get(key), list):
+            model_cfg[key] = tuple(model_cfg[key])
+    model = MelBandRoformer(**model_cfg)
+    state = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+    if isinstance(state, dict):
+        for key in ("state", "state_dict", "model_state_dict"):
+            if isinstance(state.get(key), dict):
+                state = state[key]
+                break
+    model.load_state_dict(state, strict=True)
+    model.eval()
+    model.to(device)
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +284,7 @@ class LeadRhythmSplitDiagnostics:
     rhythm: StemAudioStats | None = None
     envelope_correlation: float | None = None
     warnings: list[str] = field(default_factory=list)
+    vocal_suppression: dict | None = None  # vocal_debleed.guitar_for_split report
 
     def to_dict(self) -> dict:
         return {
@@ -260,6 +299,7 @@ class LeadRhythmSplitDiagnostics:
             "rhythm": self.rhythm.to_dict() if self.rhythm else None,
             "envelope_correlation": self.envelope_correlation,
             "warnings": list(self.warnings),
+            "vocal_suppression": self.vocal_suppression,
         }
 
     @classmethod
@@ -279,6 +319,7 @@ class LeadRhythmSplitDiagnostics:
             rhythm=stats(data.get("rhythm")),
             envelope_correlation=data.get("envelope_correlation"),
             warnings=[str(w) for w in (data.get("warnings") or [])],
+            vocal_suppression=data.get("vocal_suppression"),
         )
 
     def write_json(self, path: Path) -> Path:
@@ -439,7 +480,7 @@ def run_lead_rhythm_split(
         mix = roformer._load_audio_stereo(guitar_path, model_sr)
         dev = roformer._torch_device(device)
         roformer._cap_cpu_threads(device)
-        model = roformer._instantiate_bs_roformer_model(config, ckpt_path, dev)
+        model = build_lead_rhythm_model(config, ckpt_path, dev)
         sources = roformer._demix_track(
             model,
             mix,

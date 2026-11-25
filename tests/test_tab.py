@@ -38,14 +38,18 @@ def test_ui_effective_separate_when_demucs_missing():
 
 
 def test_entry_wires_solo_first_safer_duration_and_stem_controls():
-    page = Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "screens" / "Entry.svelte"
-    source = page.read_text(encoding="utf-8")
-    assert "Safer length" in source
+    lib = Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib"
+    # Entry collects the fields; convertFlow.ts builds the request body from them.
+    # The first screen only picks a source; length and separation defaults live in
+    # convertFlow.ts, and the picker offers "Use the whole song".
+    source = (lib / "convertFlow.ts").read_text(encoding="utf-8") + (
+        lib / "screens" / "Instruments.svelte"
+    ).read_text(encoding="utf-8")
     assert "saferLength" in source
-    assert "Separate guitar stem" in source
     assert "separateStems" in source
     assert "maxDuration" in source
     assert "max_duration_sec" in source
+    assert "Use the whole song" in source
     # Standalone app has no Isolation carry-over path.
     assert "carry_over_is_guitar_stem" not in source
     assert "switch_page" not in source
@@ -243,3 +247,11 @@ def test_estimate_tempo_bpm_delegates_to_robust():
 
     empty = pretty_midi.PrettyMIDI()
     assert estimate_tempo_bpm(empty) == 120.0
+
+
+def test_chord_positions_for_one_unplayable_pitch_is_empty_not_a_crash():
+    from audio_to_tab.tab_generate import _pick_chord_positions
+
+    # MIDI 84 needs fret 20 on the high E string; with max_fret 15 there is no position.
+    assert _pick_chord_positions([84], STANDARD_TUNING_MIDI, 5.0, 15) == []
+    assert len(_pick_chord_positions([64], STANDARD_TUNING_MIDI, 5.0, 15)) == 1

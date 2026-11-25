@@ -36,23 +36,10 @@ def _safe_name(name: str | None) -> str:
 
 
 def _lead_rhythm_available() -> bool:
-    """True when Mel-Band Lead/Rhythm split runtime is usable.
+    """True when the bundled Mel-Band RoFormer can run (find_spec only, no torch import)."""
+    from audio_to_tab.lead_rhythm_sep import is_lead_rhythm_split_available
 
-    Mirror ``lead_rhythm_sep.is_lead_rhythm_split_available`` without importing
-    ``bs_roformer`` (its ``__init__`` pulls torch and can segfault on some
-    macOS numpy builds during light API probes). Check the mel-band module
-    file on ``sys.path`` instead of ``find_spec`` on the submodule.
-    """
-    import sys
-    from pathlib import Path
-
-    for entry in sys.path:
-        if not entry:
-            continue
-        mel = Path(entry) / "bs_roformer" / "mel_band_roformer.py"
-        if mel.is_file():
-            return True
-    return False
+    return is_lead_rhythm_split_available()
 
 
 @router.get("/api/capabilities")

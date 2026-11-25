@@ -163,3 +163,64 @@ class TestMeasureTiming:
             if el.tag in ("note", "forward", "backup") and el.findtext("duration")
         )
         assert total == 4 * 480
+
+
+def _notation_parts():
+    from audio_to_tab.musicxml_export import NotationPart
+
+    vocals = NotationPart(
+        kind="staff", clef="treble", tempo_bpm=120.0, beats_per_measure=4,
+        notes=[{"pitch": 66, "start": 0.0, "end": 0.5}, {"pitch": 64, "start": 0.5, "end": 1.0}],
+    )
+    keys = NotationPart(
+        kind="staff", clef="grand", tempo_bpm=120.0, beats_per_measure=4,
+        notes=[{"pitch": 48, "start": 0.0, "end": 1.0}, {"pitch": 64, "start": 0.0, "end": 1.0}],
+    )
+    drums = NotationPart(
+        kind="drums", clef=None, tempo_bpm=120.0, beats_per_measure=4,
+        hits=[{"start": 0.0, "piece": "kick"}, {"start": 0.5, "piece": "snare"}, {"start": 0.25, "piece": "hihat"}],
+    )
+    return vocals, keys, drums
+
+
+def test_notation_parts_write_pitched_and_percussion_staves(tmp_path):
+    import xml.etree.ElementTree as ET
+
+    from audio_to_tab.musicxml_export import write_musicxml
+
+    vocals, keys, drums = _notation_parts()
+    out = write_musicxml(
+        [("Vocals", vocals), ("Piano / keys", keys), ("Drums", drums)],
+        tmp_path / "parts.musicxml", title="Song", tempo_bpm=120.0,
+    )
+    root = ET.parse(out).getroot()
+    assert [p.text for p in root.findall(".//score-part/part-name")] == ["Vocals", "Piano / keys", "Drums"]
+    p_vocals, p_keys, p_drums = root.findall("part")
+    # Pitched part: real pitches, no tab frets.
+    assert p_vocals.find(".//technical/fret") is None
+    steps = [(n.findtext("pitch/step"), n.findtext("pitch/alter")) for n in p_vocals.iter("note")]
+    assert steps == [("F", "1"), ("E", None)]
+    assert p_vocals.findtext(".//clef/sign") == "G"
+    # Grand staff: two staves, low note on staff 2.
+    assert p_keys.findtext(".//staves") == "2"
+    by_staff = {n.findtext("pitch/octave"): n.findtext("staff") for n in p_keys.iter("note")}
+    assert by_staff == {"3": "2", "4": "1"}
+    # Drums: percussion clef, unpitched notes, x notehead on the hi-hat.
+    assert p_drums.findtext(".//clef/sign") == "percussion"
+    assert len(p_drums.findall(".//unpitched")) == 3
+    assert [n.text for n in p_drums.iter("notehead")] == ["x"]
+
+
+def test_tab_part_sharps_carry_alter(tmp_path):
+    import xml.etree.ElementTree as ET
+
+    from audio_to_tab.musicxml_export import write_musicxml
+    from audio_to_tab.tab_generate import TabDocument, TabEvent, TabNote
+
+    doc = TabDocument(
+        events=[TabEvent(start=0.0, notes=[TabNote(start=0.0, end=0.5, string=3, fret=11, pitch=66)])],
+        tempo_bpm=120.0,
+    )
+    root = ET.parse(write_musicxml([("G", doc)], tmp_path / "s.musicxml", title="S", tempo_bpm=120)).getroot()
+    note = root.find(".//note")
+    assert (note.findtext("pitch/step"), note.findtext("pitch/alter")) == ("F", "1")

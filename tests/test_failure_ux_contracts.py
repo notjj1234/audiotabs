@@ -14,14 +14,19 @@ def _entry_source() -> str:
     ).read_text(encoding="utf-8")
 
 
-def test_entry_wires_ffmpeg_gate_and_advanced_controls():
+def test_entry_offers_only_the_three_sources_and_the_ffmpeg_gate():
+    """First screen: upload, YouTube search or a link. Settings live on the picker."""
     source = _entry_source()
     assert "ffmpeg" in source
-    assert "Safer length" in source
-    assert "fullTrackConfirm" in source
-    assert "onset" in source
-    assert "YouTube" in source
-    assert "solo" in source and "full_mix" in source
+    assert "Upload a file" in source
+    assert "Search YouTube" in source
+    assert "Paste a link" in source
+    for setting in ("Safer length", "Tuning", "Capo", "Advanced", "Solo guitar"):
+        assert setting not in source
+    flow = (Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "convertFlow.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "full_mix" in flow and "fullTrackConfirm" in flow
 
 
 def test_empty_transcription_message_lists_actions():
@@ -55,3 +60,33 @@ def test_failure_ux_youtube_kind_has_upload_action_only():
 
     assert failure_actions("youtube") == ("use_upload",)
     assert "solo_preset" not in failure_actions("youtube")
+
+
+def test_library_load_failure_reads_as_one_plain_sentence_with_a_short_detail():
+    from audio_to_tab.user_errors import DETAIL_MAX_CHARS, LIBRARY_MESSAGE, user_facing_message
+
+    raw = (
+        "Guitar stem separation failed: Guitar-FT separation failed; not falling back to stock: "
+        "Could not load libtorchcodec. Likely causes: 1. FFmpeg is not properly installed... "
+        "[start of libtorchcodec loading traceback] FFmpeg version 8: Traceback (most recent call last): "
+        + "x" * 4000
+    )
+    message, detail = user_facing_message(RuntimeError(raw))
+    assert message == LIBRARY_MESSAGE
+    assert detail is not None and len(detail) <= DETAIL_MAX_CHARS
+    assert "Traceback" not in detail and "Likely causes" not in detail
+
+
+def test_youtube_error_keeps_plain_text_up_front_and_details_apart():
+    from audio_to_tab.ingest import YouTubeDownloadError
+    from audio_to_tab.user_errors import user_facing_message
+
+    message, detail = user_facing_message(
+        YouTubeDownloadError(
+            "Could not download this YouTube video. Upload the audio file instead. "
+            "Details: \x1b[0;31mERROR:\x1b[0m [youtube] abc: Requested format is not available."
+        )
+    )
+    assert message.endswith("Upload the audio file instead.")
+    assert "Details" not in message
+    assert detail is not None and "\x1b" not in detail and "Requested format" in detail

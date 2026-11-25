@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -339,6 +340,37 @@ def _is_403_error(exc: BaseException) -> bool:
     return False
 
 
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# yt-dlp messages that another player client can get past: YouTube serves a
+# different format list per client, so "no format" from one isn't final.
+_RETRYABLE_YOUTUBE_TEXT = (
+    "requested format is not available",
+    "no video formats found",
+    "only images are available",
+)
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove terminal colour codes yt-dlp puts in its messages ("\x1b[0;31mERROR")."""
+    return _ANSI_ESCAPE.sub("", text)
+
+
+def _is_retryable_youtube_error(exc: BaseException) -> bool:
+    """403s and per-client format gaps are worth another player client."""
+    if _is_403_error(exc):
+        return True
+    cur: BaseException | None = exc
+    for _ in range(8):
+        if cur is None:
+            break
+        text = str(cur).lower()
+        if any(marker in text for marker in _RETRYABLE_YOUTUBE_TEXT):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 def _clear_ytdlp_cache() -> None:
     """Drop a stale player cache that often produces 403s after YouTube updates."""
     import yt_dlp
@@ -356,7 +388,9 @@ def _user_facing_youtube_error(
     attempts: int = 1,
     last_client: str | None = None,
 ) -> YouTubeDownloadError:
-    detail = str(last_exc).strip() if last_exc else "unknown error"
+    detail = _strip_ansi(str(last_exc)).strip() if last_exc else "unknown error"
+    if detail.lower().startswith("error:"):
+        detail = detail[6:].strip()
     parts = [
         "Could not download this YouTube video.",
         "Only public videos work (no login).",
@@ -623,7 +657,7 @@ def download_youtube_audio(url: str, output_dir: str | Path) -> Path:
                         log.write(f"{url}\n{player_client}\n{exc}\n\n")
                 except OSError:
                     pass
-            if not _is_403_error(exc) or index == len(_YOUTUBE_PLAYER_CLIENTS) - 1:
+            if not _is_retryable_youtube_error(exc) or index == len(_YOUTUBE_PLAYER_CLIENTS) - 1:
                 raise _user_facing_youtube_error(
                     exc, attempts=index + 1, last_client=player_client
                 ) from exc
@@ -681,7 +715,7 @@ def download_youtube_preview_video(url: str, dest: str | Path) -> Path:
                         log.write(f"{url}\npreview\n{player_client}\n{exc}\n\n")
                 except OSError:
                     pass
-            if not _is_403_error(exc) or index == len(_YOUTUBE_PLAYER_CLIENTS) - 1:
+            if not _is_retryable_youtube_error(exc) or index == len(_YOUTUBE_PLAYER_CLIENTS) - 1:
                 raise _user_facing_youtube_error(
                     exc, attempts=index + 1, last_client=player_client
                 ) from exc

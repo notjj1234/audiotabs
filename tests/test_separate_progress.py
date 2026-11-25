@@ -92,3 +92,27 @@ def test_pipeline_separate_emits_multiple_fraction_updates(monkeypatch, tmp_path
     fractions = [f for _, _, f in separate_events if f is not None]
     assert fractions == sorted(fractions)
     assert fractions[-1] >= fractions[0]
+
+
+def test_cancel_during_blocking_call_waits_for_it_before_raising():
+    """A progress callback that aborts must not leave the model running in the background."""
+    import threading
+
+    import pytest
+
+    from audio_to_tab.subprocess_util import JobAborted
+
+    finished = threading.Event()
+
+    def blocking() -> None:
+        time.sleep(0.9)
+        finished.set()
+
+    def on_progress(_message: str, _fraction: float) -> None:
+        raise JobAborted("cancelled")
+
+    with pytest.raises(JobAborted):
+        _run_blocking_with_creep(
+            blocking, on_progress=on_progress, message="Isolating", start=0.15, end=0.75
+        )
+    assert finished.is_set(), "the abort was raised while inference was still running"

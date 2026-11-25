@@ -24,8 +24,19 @@ def test_quick_setup_defaults_values():
 
 
 def test_entry_wires_fingering_preference():
-    source = (
-        Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "screens" / "Entry.svelte"
+    lib = Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib"
+    # Entry collects the fields; convertFlow.ts builds the request body from them.
+    # Tab settings moved to the instruments picker; convertFlow.ts applies them.
+    source = (lib / "screens" / "Instruments.svelte").read_text(encoding="utf-8") + (
+        lib / "convertFlow.ts"
     ).read_text(encoding="utf-8")
     assert "fingering" in source
     assert "fingering_preference" in source
+
+
+def test_picker_offers_vocal_debleed_switch():
+    source = (
+        Path(__file__).resolve().parents[1] / "app" / "web" / "src" / "lib" / "screens" / "Instruments.svelte"
+    ).read_text(encoding="utf-8")
+    assert "Remove singing that leaks into guitar" in source
+    assert "bind:checked={options.vocalDebleed}" in source

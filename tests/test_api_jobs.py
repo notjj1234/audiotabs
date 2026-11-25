@@ -153,3 +153,63 @@ def test_job_accepts_demucs_device_and_defaults_gpu_first(client, tmp_path, monk
     snap2 = client.get(f"/api/jobs/{r2.json()['job_id']}", headers=_headers())
     assert snap2.status_code == 200
     assert snap2.json()["config"]["demucs_device"] == "mps"
+
+
+def _poll_until_finished(client, job_id):
+    import time
+
+    snap = None
+    for _ in range(100):
+        snap = client.get(f"/api/jobs/{job_id}", headers=_headers()).json()
+        if snap["state"] in {"done", "failed"}:
+            break
+        time.sleep(0.02)
+    return snap
+
+
+def test_failed_job_can_be_retried_with_the_same_audio(tmp_path):
+    calls = []
+
+    def flaky(*, audio_path, youtube_url, output_dir, config, on_progress):
+        calls.append(audio_path)
+        if len(calls) == 1:
+            raise RuntimeError("separation crashed")
+        return _fake_pipeline(
+            audio_path=audio_path,
+            youtube_url=youtube_url,
+            output_dir=output_dir,
+            config=config,
+            on_progress=on_progress,
+        )
+
+    app = create_app(data_dir=tmp_path, token="t")
+    app.state.jobs = JobManager(tmp_path, runner=flaky)
+    client = TestClient(app)
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF" + b"\x00" * 40)
+    with wav.open("rb") as handle:
+        upload_id = client.post(
+            "/api/uploads", headers=_headers(), files={"file": ("clip.wav", handle, "audio/wav")}
+        ).json()["upload_id"]
+    job_id = client.post(
+        "/api/jobs",
+        headers=_headers(),
+        json={"source": {"kind": "upload", "upload_id": upload_id}, "preset": "solo"},
+    ).json()["job_id"]
+    failed = _poll_until_finished(client, job_id)
+    assert failed["state"] == "failed"
+    assert failed["error"]["message"]
+
+    retried = client.post(f"/api/jobs/{job_id}/retry", headers=_headers())
+    assert retried.status_code == 202
+    new_id = retried.json()["job_id"]
+    assert new_id != job_id
+    done = _poll_until_finished(client, new_id)
+    assert done["state"] == "done", done
+    assert calls[0] == calls[1]
+
+    # A job that finished cannot be retried, and unknown jobs say so plainly.
+    assert client.post(f"/api/jobs/{new_id}/retry", headers=_headers()).status_code == 409
+    missing = client.post("/api/jobs/nope/retry", headers=_headers())
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "job_missing"

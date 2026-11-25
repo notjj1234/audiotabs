@@ -17,6 +17,11 @@ machine.
   is a local FastAPI + web front end.
 - One product surface: entry, waiting, result, and library share one shell, one
   type system, and one accent.
+- Guitar first, every part available: after Convert the app shows which instruments
+  are in the song. Guitar (Lead / Rhythm / Combined) and bass become tab; vocals,
+  piano/keys and other become staff notation; drums become rough kick/snare/hi-hat
+  hits. The result shows one part or several together on shared bars.
+  ([instrument parts spec](docs/superpowers/specs/2026-11-25-instrument-parts-design.md))
 
 ## Who it serves
 
@@ -48,7 +53,7 @@ Measured on the audit's own rubric ([docs/ui-audit/2026-11-18-ui-ux-audit.md](do
 | Hidden labels | Every entry-card label hidden by one CSS rule | Zero hidden labels |
 | Interactive targets under 44 px | 10/11 entry, 22/23 result | Zero |
 | UI font families | Streamlit default stack | One (Instrument Sans) |
-| Accent colours | one, kept | one, kept (`#e8a317`) |
+| Accent colours | one, kept | one, kept (`#e8a317`; the built token `--accent` in `app.css` is `#F6AD49` — always use the token) |
 
 Behavioural success: cancel between stages ends `cancelled` with no partial
 folder; every export downloads a real file rebuilt from the inspector settings;

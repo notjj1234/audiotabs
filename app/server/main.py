@@ -9,9 +9,11 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from .analyses import AnalysisManager
 from .auth import resolve_token
 from .jobs import JobManager
 from .paths import web_dist_dir
+from .routes_analyses import router as analyses_router
 from .routes_jobs import router as jobs_router
 from .routes_runs import router as runs_router
 from .routes_sources import router as sources_router
@@ -29,6 +31,9 @@ def create_app(*, data_dir: Path | None = None, token: str | None = None) -> Fas
     app.state.tab_token = resolve_token(token)
     app.state.data_dir = resolved_data
     app.state.jobs = JobManager(resolved_data)
+    app.state.analyses = AnalysisManager(resolved_data)
+    # Analyses live only in memory; folders left from a previous launch are unreachable.
+    app.state.analyses.sweep(all_idle=True)
 
     @app.get("/api/health")
     def health() -> dict:
@@ -36,6 +41,7 @@ def create_app(*, data_dir: Path | None = None, token: str | None = None) -> Fas
 
     app.include_router(runs_router)
     app.include_router(jobs_router)
+    app.include_router(analyses_router)
     app.include_router(sources_router)
 
     dist = web_dist_dir()

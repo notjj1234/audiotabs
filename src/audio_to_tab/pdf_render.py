@@ -94,7 +94,7 @@ def render_structured_tab_pdf(
     _, height = letter
     margin = 0.6 * inch
     staff_gap = 11
-    strings = 6
+    strings = max(1, len(doc.tuning_names))
     beats_per_measure = doc.beats_per_measure
 
     def new_page_header(page_y: float) -> float:

@@ -673,3 +673,61 @@ def test_probe_youtube_unavailable_raises_user_error(monkeypatch):
     with patch("yt_dlp.YoutubeDL", Boom):
         with pytest.raises(YouTubeDownloadError):
             probe_youtube_availability("https://www.youtube.com/watch?v=abcdefghijk")
+
+
+def test_download_tries_the_next_client_when_a_format_is_not_available(tmp_path, monkeypatch):
+    """yt-dlp's "Requested format is not available" is per player client: retry, don't stop."""
+    monkeypatch.setattr("audio_to_tab.ingest._clear_ytdlp_cache", lambda: None)
+    monkeypatch.setattr("audio_to_tab.ingest._unlink_quiet", lambda p: None)
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF")
+    monkeypatch.setattr("audio_to_tab.ingest.normalize_audio", lambda p, *_a, **_k: Path(p))
+    calls: list[str] = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.client = ",".join(opts["extractor_args"]["youtube"]["player_client"])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=True):
+            calls.append(self.client)
+            if len(calls) == 1:
+                raise Exception("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+            if len(calls) == 2:
+                raise Exception(
+                    "\x1b[0;31mERROR:\x1b[0m [youtube] abc: Requested format is not available. "
+                    "Use --list-formats for a list of available formats"
+                )
+            return {"title": "clip"}
+
+    with patch("yt_dlp.YoutubeDL", FakeYDL):
+        path = download_youtube_audio("https://www.youtube.com/watch?v=abc", tmp_path)
+    assert path == wav
+    assert len(calls) == 3
+
+
+def test_youtube_error_message_has_no_terminal_colour_codes(tmp_path, monkeypatch):
+    monkeypatch.setattr("audio_to_tab.ingest._clear_ytdlp_cache", lambda: None)
+
+    class NoFormats:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=True):
+            raise Exception("\x1b[0;31mERROR:\x1b[0m [youtube] abc: Requested format is not available.")
+
+    with patch("yt_dlp.YoutubeDL", NoFormats), pytest.raises(YouTubeDownloadError) as caught:
+        download_youtube_audio("https://youtu.be/abc", tmp_path)
+    assert "\x1b" not in str(caught.value)
+    assert "[0;31m" not in str(caught.value)

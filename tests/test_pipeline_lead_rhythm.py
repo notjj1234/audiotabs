@@ -283,3 +283,22 @@ def test_split_error_fallback_reason_not_double_prefixed(tmp_path, monkeypatch):
         "reason"
     ]
     assert reason == "Lead/rhythm split failed: backend exploded"
+
+
+def test_rhythm_notes_come_from_the_guitar_stem_minus_lead_owned_notes(tmp_path, monkeypatch):
+    _patch_common(monkeypatch, tmp_path)  # split: lead stem 330 Hz (MIDI 64), rhythm stem 110 Hz (45)
+    seen: dict[str, Path] = {}
+    # Lead part: 67 at 0.1 s, 64 at 0.4 s, the same note as the rhythm transcription's 64.
+    monkeypatch.setattr(lead_rhythm_tab, "transcribe_lead_stem", lambda *a, **k: _tx("lead", tmp_path, [67, 64]))
+
+    def fake_rhythm(audio_path, *_a, **_k):
+        seen["audio"] = Path(audio_path)
+        return _tx("rhythm", tmp_path, [45, 64, 45])
+
+    monkeypatch.setattr(lead_rhythm_tab, "transcribe_rhythm_stem", fake_rhythm)
+    out_dir, artifacts = _run(tmp_path)
+
+    assert seen["audio"] == out_dir / "guitar_stem.wav"
+    payload = json.loads(Path(artifacts["lead_rhythm_notes"]).read_text(encoding="utf-8"))
+    assert [n["pitch"] for n in payload["rhythm"]["notes"]] == [45, 45]
+    assert payload["rhythm_source"]["lead_owned_left_out"] == 1

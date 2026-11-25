@@ -83,6 +83,25 @@ pip install -e ".[demucs,desktop,roformer,separator]"
 - **Shared engine** lives in `src/audio_to_tab/` (import as `audio_to_tab`).
 - Build the front end with `make ui-build` before `make desktop` if `app/web/dist` is missing.
 
+### How a conversion runs
+
+1. **Entry** — pick a file, YouTube link or media URL, plus settings (Advanced included).
+2. **Instruments** (full mix with stem separation) — the app downloads and trims once,
+   separates all six stems once (htdemucs_6s), splits Lead/Rhythm guitar when that engine
+   is selected, and lists every instrument with whether it was detected and how sure it is.
+   Pick the parts to tab; *Change settings* goes back with your upload intact. Solo guitar,
+   separation off, or no separator installed skip this screen (the last one says why).
+3. **Tab** — reuses the cached stems (nothing is separated twice). Guitar and bass become
+   tab, vocals / piano / other become staff notation, drums become rough kick/snare/hi-hat
+   hits. Singing that leaked into the guitar stem is removed by default on full mixes
+   (*Advanced → Remove singing that leaks into guitar*).
+4. **Result** — show **One part** or **Together** (stacked staves on shared bars, one
+   playhead and loop; `T` toggles). The choice is saved with the run. Export the current
+   part, or all shown parts as MIDI / MusicXML.
+
+Design and plan: [spec](docs/superpowers/specs/2026-11-25-instrument-parts-design.md) ·
+[plan](docs/superpowers/plans/2026-11-25-instrument-parts.md).
+
 Python **3.11** (3.10–3.12 only). Desktop installers and the tester app: [DESKTOP.md](DESKTOP.md). Hosted deploy: [DEPLOY.md](DEPLOY.md).
 
 ## Table of contents

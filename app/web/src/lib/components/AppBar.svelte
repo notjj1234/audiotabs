@@ -1,12 +1,12 @@
 <script lang="ts">
-  type Screen = 'entry' | 'waiting' | 'result' | 'library';
+  type Screen = 'entry' | 'analyzing' | 'instruments' | 'waiting' | 'result' | 'library';
 
   let {
     screen,
     onnav,
   }: {
     screen: Screen;
-    onnav: (next: Screen) => void;
+    onnav: (next: 'entry' | 'library') => void;
   } = $props();
 </script>
 
@@ -20,9 +20,7 @@
       <button
         type="button"
         class="nav-button"
-        aria-current={screen === 'entry' || screen === 'waiting' || screen === 'result'
-          ? 'page'
-          : undefined}
+        aria-current={screen !== 'library' ? 'page' : undefined}
         onclick={() => onnav('entry')}
       >
         Transcribe

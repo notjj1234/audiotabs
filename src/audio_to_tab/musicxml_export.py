@@ -17,7 +17,9 @@ Scope notes (deliberately minimal):
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from audio_to_tab.tab_generate import TabDocument, TabNote
 
@@ -30,7 +32,7 @@ _STEP_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 def _pitch_elements(parent: ET.Element, pitch: int) -> None:
     name = _STEP_NAMES[pitch % 12]
-    step, _, _sharp = name.partition("#")
+    step, _sharp, _ = name.partition("#")
     pitch_el = ET.SubElement(parent, "pitch")
     ET.SubElement(pitch_el, "step").text = step
     if _sharp:
@@ -59,10 +61,18 @@ def _type_name(ticks: int) -> str:
 
 
 def _line_midi(tuning_names: tuple[str, ...]) -> list[int]:
-    """MIDI per TAB line (line 1 = high e … line 6 = low E)."""
+    """MIDI per TAB line, top line first (line 1 = highest string)."""
+    from audio_to_tab.tuning import REFERENCE_OPEN_MIDI
+
+    reference = REFERENCE_OPEN_MIDI.get(len(tuning_names), _STANDARD_LINE_MIDI_LOW_FIRST)
+    count = len(reference)
     lines: list[int] = []
-    for i, std_midi in enumerate(reversed(_STANDARD_LINE_MIDI_LOW_FIRST)):
-        name = tuning_names[5 - i] if len(tuning_names) == 6 else _STEP_NAMES[std_midi % 12]
+    for i, std_midi in enumerate(reversed(reference)):
+        name = (
+            tuning_names[count - 1 - i]
+            if len(tuning_names) == count
+            else _STEP_NAMES[std_midi % 12]
+        )
         candidates = [
             midi
             for midi in range(std_midi - 3, std_midi + 4)
@@ -70,6 +80,112 @@ def _line_midi(tuning_names: tuple[str, ...]) -> list[int]:
         ]
         lines.append(min(candidates, key=lambda m: abs(m - std_midi)) if candidates else std_midi)
     return lines
+
+
+@dataclass
+class NotationPart:
+    """A non-tab part from the score payload: pitched notes (staff) or kit hits (drums)."""
+
+    kind: str  # "staff" | "drums"
+    clef: str | None
+    tempo_bpm: float
+    beats_per_measure: int
+    notes: list[dict[str, Any]] = field(default_factory=list)
+    hits: list[dict[str, Any]] = field(default_factory=list)
+
+
+# Standard drum-kit placement on a five-line percussion staff.
+_DRUM_DISPLAY = {"kick": ("F", 4), "snare": ("C", 5), "hihat": ("G", 5)}
+_DRUM_SECONDS = 0.25
+_ONSET_WINDOW = 0.03
+
+
+def _write_notation_part(part_el: ET.Element, part: NotationPart) -> None:
+    sec_per_quarter = 60.0 / max(1.0, float(part.tempo_bpm))
+    beats = max(1, int(part.beats_per_measure))
+    measure_sec = sec_per_quarter * beats
+    measure_ticks = beats * DIVISIONS
+    if part.kind == "drums":
+        items = [
+            {"start": float(h["start"]), "end": float(h["start"]) + _DRUM_SECONDS, "piece": str(h["piece"])}
+            for h in part.hits
+            if h.get("piece") in _DRUM_DISPLAY
+        ]
+    else:
+        items = [
+            {"start": float(n["start"]), "end": float(n["end"]), "pitch": int(n["pitch"])}
+            for n in part.notes
+        ]
+    items.sort(key=lambda it: (it["start"], it.get("pitch", 0)))
+    groups: list[list[dict[str, Any]]] = []
+    for item in items:
+        if groups and item["start"] - groups[-1][0]["start"] <= _ONSET_WINDOW:
+            groups[-1].append(item)
+        else:
+            groups.append([item])
+    last = max((g[0]["start"] for g in groups), default=0.0)
+    measure_count = max(1, int(last / measure_sec) + 1)
+    grand = part.kind == "staff" and part.clef == "grand"
+
+    for measure_index in range(measure_count):
+        measure = ET.SubElement(part_el, "measure", number=str(measure_index + 1))
+        attributes = ET.SubElement(measure, "attributes")
+        ET.SubElement(attributes, "divisions").text = str(DIVISIONS)
+        if measure_index == 0:
+            time_el = ET.SubElement(attributes, "time")
+            ET.SubElement(time_el, "beats").text = str(beats)
+            ET.SubElement(time_el, "beat-type").text = "4"
+            if grand:
+                ET.SubElement(attributes, "staves").text = "2"
+                for number, sign, line in ((1, "G", 2), (2, "F", 4)):
+                    clef = ET.SubElement(attributes, "clef", number=str(number))
+                    ET.SubElement(clef, "sign").text = sign
+                    ET.SubElement(clef, "line").text = str(line)
+            elif part.kind == "drums":
+                clef = ET.SubElement(attributes, "clef")
+                ET.SubElement(clef, "sign").text = "percussion"
+            else:
+                clef = ET.SubElement(attributes, "clef")
+                ET.SubElement(clef, "sign").text = "G"
+                ET.SubElement(clef, "line").text = "2"
+
+        measure_start = measure_index * measure_sec
+        cursor = 0
+        for group in groups:
+            if int(group[0]["start"] / measure_sec) != measure_index:
+                continue
+            start_ticks = max(0, round((group[0]["start"] - measure_start) / sec_per_quarter * DIVISIONS))
+            if start_ticks > cursor:
+                forward = ET.SubElement(measure, "forward")
+                ET.SubElement(forward, "duration").text = str(start_ticks - cursor)
+                cursor = start_ticks
+            elif start_ticks < cursor:
+                backup = ET.SubElement(measure, "backup")
+                ET.SubElement(backup, "duration").text = str(cursor - start_ticks)
+                cursor = start_ticks
+            ticks = max(1, round(max(0.01, group[0]["end"] - group[0]["start"]) / sec_per_quarter * DIVISIONS))
+            ticks = min(ticks, max(1, measure_ticks - start_ticks))
+            for index, item in enumerate(group):
+                note_el = ET.SubElement(measure, "note")
+                if index > 0:
+                    ET.SubElement(note_el, "chord")
+                if part.kind == "drums":
+                    step, octave = _DRUM_DISPLAY[item["piece"]]
+                    unpitched = ET.SubElement(note_el, "unpitched")
+                    ET.SubElement(unpitched, "display-step").text = step
+                    ET.SubElement(unpitched, "display-octave").text = str(octave)
+                else:
+                    _pitch_elements(note_el, item["pitch"])
+                ET.SubElement(note_el, "duration").text = str(ticks)
+                ET.SubElement(note_el, "type").text = _type_name(ticks)
+                if part.kind == "drums" and item["piece"] == "hihat":
+                    ET.SubElement(note_el, "notehead").text = "x"
+                if grand:
+                    ET.SubElement(note_el, "staff").text = "1" if item["pitch"] >= 60 else "2"
+            cursor += ticks
+        if cursor < measure_ticks:
+            forward = ET.SubElement(measure, "forward")
+            ET.SubElement(forward, "duration").text = str(measure_ticks - cursor)
 
 
 def _write_part(part_el: ET.Element, doc: TabDocument) -> None:
@@ -94,11 +210,11 @@ def _write_part(part_el: ET.Element, doc: TabDocument) -> None:
             ET.SubElement(clef, "sign").text = "TAB"
             ET.SubElement(clef, "line").text = "5"
             details = ET.SubElement(attributes, "staff-details")
-            ET.SubElement(details, "staff-lines").text = "6"
+            ET.SubElement(details, "staff-lines").text = str(len(lines))
             for line_no, midi in enumerate(lines, start=1):
                 tuning = ET.SubElement(details, "staff-tuning", line=str(line_no))
                 name = _STEP_NAMES[midi % 12]
-                step, _, _sharp = name.partition("#")
+                step, _sharp, _ = name.partition("#")
                 ET.SubElement(tuning, "tuning-step").text = step
                 if _sharp:
                     ET.SubElement(tuning, "tuning-alter").text = "1"
@@ -135,7 +251,7 @@ def _write_part(part_el: ET.Element, doc: TabDocument) -> None:
                 ET.SubElement(note_el, "type").text = _type_name(ticks)
                 notations = ET.SubElement(note_el, "notations")
                 technical = ET.SubElement(notations, "technical")
-                ET.SubElement(technical, "string").text = str(6 - int(note.string))
+                ET.SubElement(technical, "string").text = str(len(lines) - int(note.string))
                 ET.SubElement(technical, "fret").text = str(int(note.fret))
                 group_ticks = max(group_ticks, ticks if index == 0 else 0)
             cursor += group_ticks
@@ -145,13 +261,13 @@ def _write_part(part_el: ET.Element, doc: TabDocument) -> None:
 
 
 def write_musicxml(
-    parts: list[tuple[str, TabDocument]],
+    parts: list[tuple[str, TabDocument | NotationPart]],
     output_path: str | Path,
     *,
     title: str,
     tempo_bpm: float,
 ) -> Path:
-    """Write ``parts`` (display name, tab document) to a MusicXML 4.0 file."""
+    """Write ``parts`` (display name, tab document or notation part) to a MusicXML 4.0 file."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -167,7 +283,10 @@ def write_musicxml(
 
     for index, (_name, doc) in enumerate(parts):
         part_el = ET.SubElement(root, "part", id=f"P{index + 1}")
-        _write_part(part_el, doc)
+        if isinstance(doc, NotationPart):
+            _write_notation_part(part_el, doc)
+        else:
+            _write_part(part_el, doc)
         first_measure = part_el.find("measure")
         if first_measure is not None:
             direction = ET.Element("direction", placement="above")

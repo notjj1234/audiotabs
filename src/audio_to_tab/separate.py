@@ -87,7 +87,14 @@ def _run_blocking_with_creep(
     while not done.wait(0.4):
         elapsed = time.monotonic() - t0
         frac = start + span * (1.0 - math.exp(-elapsed / max(tau_sec, 1.0)))
-        _emit_separate_progress(on_progress, message, min(frac, end - 0.01))
+        try:
+            _emit_separate_progress(on_progress, message, min(frac, end - 0.01))
+        except BaseException:
+            # Cancelled (or the callback failed): in-process inference can't be
+            # interrupted, so wait for it to finish before unwinding. Otherwise a
+            # second separation could start while this one still holds CPU/RAM.
+            thread.join()
+            raise
     thread.join()
     if errors:
         raise errors[0]
@@ -327,11 +334,18 @@ def run_demucs_guitar_ft_inprocess(
     path so CPU runs stay chunked instead of building a full-track tensor.
     ``shifts`` / ``overlap`` override the Quality map when set.
     """
+    import numpy as np
+    import soundfile as sf
     import torch
-    import torchaudio
     from demucs.apply import apply_model
-    from demucs.audio import convert_audio, save_audio
+    from demucs.audio import convert_audio
     from demucs.pretrained import get_model
+
+    # torchaudio>=2.9 loads and saves through torchcodec, which needs FFmpeg 4-8
+    # shared libraries; a newer or missing FFmpeg made this path crash with
+    # "Could not load libtorchcodec". The input is already a canonical WAV, so
+    # soundfile (a project dependency) reads and writes it without FFmpeg.
+    from audio_to_tab.demucs_bootstrap import save_audio
 
     weights_path = download_guitar_ft_weights()
     model = get_model("htdemucs_6s")
@@ -362,7 +376,8 @@ def run_demucs_guitar_ft_inprocess(
         )
     )
 
-    wav, sr = torchaudio.load(str(audio_path))
+    data, sr = sf.read(str(audio_path), dtype="float32", always_2d=True)
+    wav = torch.from_numpy(np.ascontiguousarray(data.T))
     wav = convert_audio(wav, sr, model.samplerate, model.audio_channels)
     ref = wav.mean(0)
     wav = (wav - ref.mean()) / (ref.std() + 1e-8)
@@ -481,6 +496,7 @@ def _run_demucs_guitar_cli(
     quality: str,
     demucs_segment: int | None,
     demucs_jobs: int,
+    should_abort: Callable[[], bool] | None = None,
 ) -> None:
     from audio_to_tab.isolate import effective_demucs_segment
 
@@ -506,7 +522,299 @@ def _run_demucs_guitar_cli(
     if segment is not None:
         demucs_args.extend(["--segment", str(segment)])
     demucs_args.append(str(src))
-    run_demucs(demucs_args)
+    if should_abort is not None:
+        run_demucs(demucs_args, should_abort=should_abort)
+    else:
+        run_demucs(demucs_args)
+
+
+# Every call that actually runs a separation model on a mix. Tests assert the
+# tab phase never bumps it when it reuses a cached analysis.
+SEPARATION_CALLS = 0
+
+FULL_STEM_NAMES = ("vocals", "drums", "bass", "guitar", "piano", "other")
+DEFAULT_BLEED_GATE_COMPETITORS = ("other", "bass", "drums")
+
+
+def _check_backend(model: str) -> None:
+    from audio_to_tab.isolate import DEMUCS_MODELS
+    from audio_to_tab.roformer import (
+        ROFORMER_INSTALL_HINT,
+        ROFORMER_MODELS,
+        is_roformer_backend_available,
+    )
+    from audio_to_tab.scnet import SCNET_INSTALL_HINT, SCNET_MODELS, is_scnet_available
+
+    if model in ROFORMER_MODELS and not is_roformer_backend_available():
+        raise RuntimeError(
+            f"Model {model!r} needs the optional RoFormer backend, which "
+            f"is not installed. {ROFORMER_INSTALL_HINT}"
+        )
+    if model in SCNET_MODELS and not is_scnet_available():
+        raise RuntimeError(
+            f"Model {model!r} needs the optional SCNet runtime, which "
+            f"is not installed. {SCNET_INSTALL_HINT}"
+        )
+    if model not in ROFORMER_MODELS and model not in SCNET_MODELS:
+        if model not in DEMUCS_MODELS:
+            raise ValueError(f"Unsupported model {model!r}")
+        if not is_demucs_available():
+            raise RuntimeError(
+                "Demucs is not installed. Install with: pip install -r requirements-demucs.txt"
+            )
+
+
+def run_full_separation(
+    audio_path: str | Path,
+    out_dir: str | Path,
+    *,
+    model: str = "htdemucs_6s",
+    guitar_checkpoint: str | None = None,
+    device: str = "cpu",
+    quality: str = "fast",
+    demucs_segment: int | None = 8,
+    demucs_jobs: int = 1,
+    should_abort: Callable[[], bool] | None = None,
+    on_progress: SeparateProgressCallback | None = None,
+) -> dict[str, Path]:
+    """Run the separation model once and keep every stem it writes.
+
+    Returns ``{stem_name: out_dir/<stem_name>.wav}`` for each of
+    ``FULL_STEM_NAMES`` the model produced. Raises when no guitar stem exists.
+    """
+    global SEPARATION_CALLS
+    from audio_to_tab.isolate import effective_demucs_segment
+    from audio_to_tab.roformer import ROFORMER_MODELS, collect_named_stems, run_roformer_model
+    from audio_to_tab.scnet import SCNET_MODELS, run_scnet_model
+
+    src = Path(audio_path)
+    dest_dir = Path(out_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    _check_backend(model)
+    SEPARATION_CALLS += 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        if model in ROFORMER_MODELS or model in SCNET_MODELS:
+            label = (
+                "Isolating guitar stem with SCNet"
+                if model in SCNET_MODELS
+                else "Isolating guitar stem with BS-RoFormer"
+            )
+            _emit_separate_progress(on_progress, label, 0.15)
+
+            def _run_alt_model() -> None:
+                if model in SCNET_MODELS:
+                    run_scnet_model(src, tmp_path, device=device)
+                else:
+                    run_roformer_model(src, tmp_path, model=model, device=device)
+
+            _run_blocking_with_creep(
+                _run_alt_model, on_progress=on_progress, message=label, start=0.15, end=0.75
+            )
+            found = collect_named_stems(tmp_path, FULL_STEM_NAMES)
+        else:
+            want_guitar_ft = (
+                guitar_checkpoint == GUITAR_FT_CHECKPOINT_ID and model == "htdemucs_6s"
+            )
+            if want_guitar_ft and not guitar_ft_weights_cached():
+                raise RuntimeError(
+                    "Guitar-FT was requested but its weights are not in the torch "
+                    f"cache; not falling back to stock htdemucs_6s. {GUITAR_FT_CACHE_HINT}"
+                )
+            label = (
+                "Isolating guitar stem with guitar-ft Demucs"
+                if want_guitar_ft
+                else "Isolating guitar stem"
+            )
+            _emit_separate_progress(on_progress, label, 0.15)
+            if want_guitar_ft:
+
+                def _run_guitar_ft() -> None:
+                    run_demucs_guitar_ft_inprocess(
+                        src,
+                        tmp_path,
+                        device=device,
+                        quality=quality,
+                        segment=effective_demucs_segment(model, demucs_segment),
+                        jobs=max(1, int(demucs_jobs)),
+                    )
+
+                try:
+                    _run_blocking_with_creep(
+                        _run_guitar_ft,
+                        on_progress=on_progress,
+                        message=label,
+                        start=0.15,
+                        end=0.75,
+                    )
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Guitar-FT separation failed; not falling back to stock: {exc}"
+                    ) from exc
+            else:
+
+                def _run_demucs_cli() -> None:
+                    _run_demucs_guitar_cli(
+                        src,
+                        tmp_path,
+                        model=model,
+                        device=device,
+                        quality=quality,
+                        demucs_segment=demucs_segment,
+                        demucs_jobs=demucs_jobs,
+                        should_abort=should_abort,
+                    )
+
+                _run_blocking_with_creep(
+                    _run_demucs_cli, on_progress=on_progress, message=label, start=0.15, end=0.75
+                )
+            found = {}
+            for name in FULL_STEM_NAMES:
+                matches = sorted(tmp_path.rglob(f"{name}.wav"))
+                if matches:
+                    found[name] = matches[0]
+
+        if "guitar" not in found:
+            raise FileNotFoundError(
+                f"Separator did not produce a guitar stem for model {model}. "
+                "Ensure the model supports guitar separation (htdemucs_6s)."
+            )
+        stems: dict[str, Path] = {}
+        for name, path in found.items():
+            target = dest_dir / f"{name}.wav"
+            shutil.move(str(path), target)
+            stems[name] = target
+    return stems
+
+
+def postprocess_guitar_stem(
+    stems: dict[str, Path],
+    out: str | Path,
+    *,
+    model: str = "htdemucs_6s",
+    device: str = "cpu",
+    guitar_refine: bool = False,
+    fold_other_mode: str | None = None,
+    bleed_gate: bool = False,
+    bleed_gate_competitors: tuple[str, ...] = DEFAULT_BLEED_GATE_COMPETITORS,
+    sub_bass_debleed: bool = False,
+    low_end_restore_db: float = 0.0,
+    adaptive_fold_gain: bool = False,
+    guitar_ensemble_src: Path | None = None,
+    recovery_diagnostics_path: Path | None = None,
+    bleed_gate_diagnostics_path: Path | None = None,
+    on_progress: SeparateProgressCallback | None = None,
+) -> Path:
+    """Build the tab guitar stem from already-separated stems (no model run on the mix).
+
+    Copies ``stems["guitar"]`` to ``out`` then applies the opt-in steps in the
+    historical order: ensemble → refine → fold-other → bleed gate → low-end.
+    The cached stems themselves are never modified.
+    """
+    from audio_to_tab.isolate import FOLD_OTHER_MODES, apply_guitar_low_end_recovery
+
+    if fold_other_mode is not None and fold_other_mode not in FOLD_OTHER_MODES:
+        raise ValueError(
+            f"Unsupported fold_other_mode {fold_other_mode!r}. "
+            f"Choose from: {', '.join(FOLD_OTHER_MODES)}"
+        )
+    guitar = stems.get("guitar")
+    if guitar is None or not Path(guitar).is_file():
+        raise FileNotFoundError("No guitar stem to post-process.")
+    out_p = Path(out)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(guitar, out_p)
+    other = stems.get("other")
+
+    if guitar_ensemble_src is not None:
+        _emit_separate_progress(on_progress, "Blending guitar ensemble", 0.8)
+        _ensemble_guitar(out_p, Path(guitar_ensemble_src), device=device)
+
+    _emit_separate_progress(on_progress, "Refining guitar stem", 0.86)
+    _maybe_refine_guitar_stem(
+        out_p, other, device=device, guitar_refine=guitar_refine, model=model
+    )
+
+    if fold_other_mode:
+        _emit_separate_progress(on_progress, "Folding leftover mix", 0.9)
+        from audio_to_tab.isolate import apply_fold_other_into_guitar
+
+        apply_fold_other_into_guitar(
+            {"guitar": out_p, "other": other},
+            mode=fold_other_mode,
+            adaptive_gain=adaptive_fold_gain,
+        )
+
+    if bleed_gate:
+        _emit_separate_progress(on_progress, "Cleaning stem bleed", 0.95)
+        from audio_to_tab.isolate import apply_bleed_gate
+
+        competitors = {
+            name: stems[name]
+            for name in bleed_gate_competitors
+            if name != "guitar" and stems.get(name) is not None
+        }
+        diag = apply_bleed_gate(out_p, out_p, competitor_paths=competitors)
+        if diag.attempted and bleed_gate_diagnostics_path is not None:
+            diag.write_json(bleed_gate_diagnostics_path)
+
+    if sub_bass_debleed or low_end_restore_db:
+        recovery = apply_guitar_low_end_recovery(
+            out_p,
+            out_p,
+            bass_path=stems.get("bass"),
+            drums_path=stems.get("drums"),
+            sub_bass_debleed=sub_bass_debleed,
+            boost_db=low_end_restore_db,
+        )
+        if recovery.attempted:
+            logger.debug("tab guitar low-end recovery: %s", recovery.reason)
+            if recovery_diagnostics_path is not None:
+                recovery.write_json(recovery_diagnostics_path)
+
+    if not out_p.exists() or out_p.stat().st_size == 0:
+        raise RuntimeError(f"Guitar stem output missing or empty: {out_p}")
+    return out_p
+
+
+def _ensemble_guitar(guitar_path: Path, src: Path, *, device: str) -> None:
+    from audio_to_tab.isolate import blend_guitar_stems
+    from audio_to_tab.roformer import (
+        BS_ROFORMER_SW_ID,
+        ROFORMER_INSTALL_HINT,
+        collect_named_stems,
+        is_roformer_backend_available,
+        run_roformer_model,
+    )
+
+    if not is_roformer_backend_available():
+        logger.warning(
+            "guitar ensemble requested but the RoFormer backend is not installed; "
+            "keeping the primary Demucs guitar stem. %s",
+            ROFORMER_INSTALL_HINT,
+        )
+        return
+    with tempfile.TemporaryDirectory() as ens_tmp:
+        ens_out = Path(ens_tmp)
+        try:
+            run_roformer_model(src, ens_out, model=BS_ROFORMER_SW_ID, device=device)
+        except Exception as exc:
+            logger.warning(
+                "guitar ensemble secondary separation failed; keeping the primary guitar stem: %s",
+                exc,
+            )
+            return
+        secondary_path = collect_named_stems(ens_out, ("guitar",)).get("guitar")
+        if secondary_path is None:
+            logger.warning(
+                "guitar ensemble secondary separation produced no guitar stem; "
+                "keeping the primary guitar stem"
+            )
+            return
+        diag = blend_guitar_stems(guitar_path, secondary_path, guitar_path)
+        if diag.attempted:
+            logger.debug("guitar ensemble: %s", diag.reason)
 
 
 def separate_guitar_stem(
@@ -530,307 +838,62 @@ def separate_guitar_stem(
     bleed_gate_diagnostics_path: Path | None = None,
     vocal_output: Path | None = None,
     on_progress: SeparateProgressCallback | None = None,
+    should_abort: Callable[[], bool] | None = None,
 ) -> Path:
     """
     Extract guitar stem using Demucs CLI (or an opt-in RoFormer backend).
 
-    quality presets mirror TabGrabber: fast | balanced | high | extreme.
-    ``demucs_segment`` / ``demucs_jobs`` match the isolate path so this is not
-    a full-track tensor (isolate defaults: segment 8s clamped per model, jobs 1).
+    ``run_full_separation`` followed by ``postprocess_guitar_stem``; the
+    non-guitar stems are discarded except ``vocals`` when ``vocal_output`` is
+    set. quality presets mirror TabGrabber: fast | balanced | high | extreme.
     ``fold_other_mode`` mixes the leftover ``other`` stem into the guitar stem
     (full | best_effort | band_limited) instead of discarding it.
-    ``on_progress(message, fraction)`` reports real sub-phases; during the
-    primary model call, fraction may creep on elapsed time inside a capped band
-    and never reaches stage completion until the call returns.
+    ``on_progress(message, fraction)`` reports real sub-phases.
     """
-    from audio_to_tab.isolate import (
-        DEMUCS_MODELS,
-        FOLD_OTHER_MODES,
-        apply_guitar_low_end_recovery,
-        effective_demucs_segment,
-    )
+    from audio_to_tab.isolate import DEMUCS_MODELS, FOLD_OTHER_MODES
+
     if fold_other_mode is not None and fold_other_mode not in FOLD_OTHER_MODES:
         raise ValueError(
             f"Unsupported fold_other_mode {fold_other_mode!r}. "
             f"Choose from: {', '.join(FOLD_OTHER_MODES)}"
         )
-    from audio_to_tab.roformer import (
-        BS_ROFORMER_SW_ID,
-        ROFORMER_INSTALL_HINT,
-        ROFORMER_MODELS,
-        collect_named_stems,
-        is_roformer_backend_available,
-        run_roformer_model,
+    out = (
+        temporary_output_path("stem_", "_guitar.wav") if output_path is None else Path(output_path)
     )
-    from audio_to_tab.scnet import (
-        SCNET_INSTALL_HINT,
-        SCNET_MODELS,
-        is_scnet_available,
-        run_scnet_model,
-    )
-
-    src = Path(audio_path)
-    if output_path is None:
-        out = temporary_output_path("stem_", "_guitar.wav")
-    else:
-        out = Path(output_path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-
-    resolved_model = model
-    if resolved_model in ROFORMER_MODELS and not is_roformer_backend_available():
-        raise RuntimeError(
-            f"Model {resolved_model!r} needs the optional RoFormer backend, which "
-            f"is not installed. {ROFORMER_INSTALL_HINT}"
-        )
-    if resolved_model in SCNET_MODELS and not is_scnet_available():
-        raise RuntimeError(
-            f"Model {resolved_model!r} needs the optional SCNet runtime, which "
-            f"is not installed. {SCNET_INSTALL_HINT}"
-        )
-
-    def _apply_low_end_recovery(stems: dict[str, Path]) -> None:
-        if not sub_bass_debleed and not low_end_restore_db:
-            return
-        recovery = apply_guitar_low_end_recovery(
-            out,
-            out,
-            bass_path=stems.get("bass"),
-            drums_path=stems.get("drums"),
-            sub_bass_debleed=sub_bass_debleed,
-            boost_db=low_end_restore_db,
-        )
-        if recovery.attempted:
-            logger.debug("tab guitar low-end recovery: %s", recovery.reason)
-            if recovery_diagnostics_path is not None:
-                recovery.write_json(recovery_diagnostics_path)
-
-    def _maybe_fold_other(guitar_path: Path, other_path: Path | None) -> None:
-        if not fold_other_mode:
-            return
-        from audio_to_tab.isolate import apply_fold_other_into_guitar
-
-        apply_fold_other_into_guitar(
-            {"guitar": guitar_path, "other": other_path},
-            mode=fold_other_mode,
-            adaptive_gain=adaptive_fold_gain,
-        )
-
-    def _maybe_bleed_gate(guitar_path: Path, stems: dict[str, Path | None]) -> None:
-        if not bleed_gate:
-            return
-        from audio_to_tab.isolate import apply_bleed_gate
-
-        competitors = {
-            name: path for name, path in stems.items() if path is not None
-        }
-        diag = apply_bleed_gate(
-            guitar_path, guitar_path, competitor_paths=competitors
-        )
-        if diag.attempted and bleed_gate_diagnostics_path is not None:
-            diag.write_json(bleed_gate_diagnostics_path)
-
-    def _maybe_ensemble_guitar(guitar_path: Path, src: Path) -> None:
-        if not guitar_ensemble:
-            return
-        from audio_to_tab.isolate import blend_guitar_stems
-
-        if not is_roformer_backend_available():
-            logger.warning(
-                "guitar ensemble requested but the RoFormer backend is not installed; "
-                "keeping the primary Demucs guitar stem. %s",
-                ROFORMER_INSTALL_HINT,
-            )
-            return
-        with tempfile.TemporaryDirectory() as ens_tmp:
-            ens_out = Path(ens_tmp)
-            try:
-                run_roformer_model(
-                    src, ens_out, model=BS_ROFORMER_SW_ID, device=device
-                )
-            except Exception as exc:
-                logger.warning(
-                    "guitar ensemble secondary separation failed; "
-                    "keeping the primary guitar stem: %s",
-                    exc,
-                )
-                return
-            secondary = collect_named_stems(ens_out, ("guitar",))
-            secondary_path = secondary.get("guitar")
-            if secondary_path is None:
-                logger.warning(
-                    "guitar ensemble secondary separation produced no guitar stem; "
-                    "keeping the primary guitar stem"
-                )
-                return
-            diag = blend_guitar_stems(
-                guitar_path, secondary_path, guitar_path
-            )
-            if diag.attempted:
-                logger.debug("guitar ensemble: %s", diag.reason)
-
-    def _copy_vocals(root: Path) -> None:
-        if vocal_output is None:
-            return
-        matches = sorted(root.rglob("vocals.wav"))
-        if not matches:
-            return
-        dest = Path(vocal_output)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(matches[0], dest)
-
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        if resolved_model in ROFORMER_MODELS or resolved_model in SCNET_MODELS:
-            model_label = (
-                "Isolating guitar stem with SCNet"
-                if resolved_model in SCNET_MODELS
-                else "Isolating guitar stem with BS-RoFormer"
-            )
-            _emit_separate_progress(on_progress, model_label, 0.15)
-
-            def _run_alt_model() -> None:
-                if resolved_model in SCNET_MODELS:
-                    run_scnet_model(src, tmp_path, device=device)
-                else:
-                    run_roformer_model(src, tmp_path, model=resolved_model, device=device)
-
-            _run_blocking_with_creep(
-                _run_alt_model,
-                on_progress=on_progress,
-                message=model_label,
-                start=0.15,
-                end=0.75,
-            )
-            found = collect_named_stems(tmp_path, ("guitar", "other", "bass", "drums"))
-            if "guitar" not in found:
-                raise FileNotFoundError(
-                    f"Separator did not produce a guitar stem for model {resolved_model}."
-                )
-            shutil.copy2(found["guitar"], out)
-            _emit_separate_progress(on_progress, "Refining guitar stem", 0.82)
-            _maybe_refine_guitar_stem(
-                out,
-                found.get("other"),
-                device=device,
-                guitar_refine=guitar_refine,
-                model=resolved_model,
-            )
-            _emit_separate_progress(on_progress, "Folding leftover mix", 0.88)
-            _maybe_fold_other(out, found.get("other"))
-            _emit_separate_progress(on_progress, "Cleaning stem bleed", 0.93)
-            _maybe_bleed_gate(out, found)
-            _apply_low_end_recovery(found)
-            _copy_vocals(tmp_path)
-            _emit_separate_progress(on_progress, model_label, 0.99)
-            return out
-
-        if resolved_model not in DEMUCS_MODELS:
-            raise ValueError(f"Unsupported model {resolved_model!r}")
-
-        if not is_demucs_available():
-            raise RuntimeError(
-                "Demucs is not installed. Install with: pip install -r requirements-demucs.txt"
-            )
-
-        used_guitar_ft = False
-        want_guitar_ft = (
-            guitar_checkpoint == GUITAR_FT_CHECKPOINT_ID
-            and resolved_model == "htdemucs_6s"
+        stems = run_full_separation(
+            audio_path,
+            Path(tmp) / "stems",
+            model=model,
+            guitar_checkpoint=guitar_checkpoint,
+            device=device,
+            quality=quality,
+            demucs_segment=demucs_segment,
+            demucs_jobs=demucs_jobs,
+            should_abort=should_abort,
+            on_progress=on_progress,
         )
-        if want_guitar_ft and not guitar_ft_weights_cached():
-            raise RuntimeError(
-                "Guitar-FT was requested but its weights are not in the torch "
-                f"cache; not falling back to stock htdemucs_6s. {GUITAR_FT_CACHE_HINT}"
-            )
-        demucs_label = (
-            "Isolating guitar stem with guitar-ft Demucs"
-            if want_guitar_ft
-            else "Isolating guitar stem"
-        )
-        _emit_separate_progress(on_progress, demucs_label, 0.15)
-        if want_guitar_ft:
-            try:
-
-                def _run_guitar_ft() -> None:
-                    run_demucs_guitar_ft_inprocess(
-                        src,
-                        tmp_path,
-                        device=device,
-                        quality=quality,
-                        segment=effective_demucs_segment(resolved_model, demucs_segment),
-                        jobs=max(1, int(demucs_jobs)),
-                    )
-
-                _run_blocking_with_creep(
-                    _run_guitar_ft,
-                    on_progress=on_progress,
-                    message=demucs_label,
-                    start=0.15,
-                    end=0.75,
-                )
-                used_guitar_ft = True
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Guitar-FT separation failed; not falling back to stock: {exc}"
-                ) from exc
-
-        if not used_guitar_ft:
-
-            def _run_demucs_cli() -> None:
-                _run_demucs_guitar_cli(
-                    src,
-                    tmp_path,
-                    model=resolved_model,
-                    device=device,
-                    quality=quality,
-                    demucs_segment=demucs_segment,
-                    demucs_jobs=demucs_jobs,
-                )
-
-            _run_blocking_with_creep(
-                _run_demucs_cli,
-                on_progress=on_progress,
-                message=demucs_label,
-                start=0.15,
-                end=0.75,
-            )
-
-        guitar_files = list(tmp_path.rglob("guitar.wav"))
-        if not guitar_files:
-            raise FileNotFoundError(
-                "Demucs did not produce a guitar stem. "
-                "Ensure model supports guitar separation (htdemucs_6s)."
-            )
-        other_files = list(tmp_path.rglob("other.wav"))
-        bass_files = list(tmp_path.rglob("bass.wav"))
-        drum_files = list(tmp_path.rglob("drums.wav"))
-        shutil.copy2(guitar_files[0], out)
-        _emit_separate_progress(on_progress, "Blending guitar ensemble", 0.8)
-        _maybe_ensemble_guitar(out, src)
-        _emit_separate_progress(on_progress, "Refining guitar stem", 0.86)
-        _maybe_refine_guitar_stem(
+        postprocess_guitar_stem(
+            stems,
             out,
-            other_files[0] if other_files else None,
+            model=model,
             device=device,
             guitar_refine=guitar_refine,
-            model=resolved_model,
+            fold_other_mode=fold_other_mode,
+            bleed_gate=bleed_gate,
+            sub_bass_debleed=sub_bass_debleed,
+            low_end_restore_db=low_end_restore_db,
+            adaptive_fold_gain=adaptive_fold_gain,
+            guitar_ensemble_src=(
+                Path(audio_path) if guitar_ensemble and model in DEMUCS_MODELS else None
+            ),
+            recovery_diagnostics_path=recovery_diagnostics_path,
+            bleed_gate_diagnostics_path=bleed_gate_diagnostics_path,
+            on_progress=on_progress,
         )
-        _emit_separate_progress(on_progress, "Folding leftover mix", 0.9)
-        _maybe_fold_other(out, other_files[0] if other_files else None)
-        stem_refs = {
-            "guitar": guitar_files[0],
-            "other": other_files[0] if other_files else None,
-            "bass": bass_files[0] if bass_files else None,
-            "drums": drum_files[0] if drum_files else None,
-        }
-        _emit_separate_progress(on_progress, "Cleaning stem bleed", 0.95)
-        _maybe_bleed_gate(out, stem_refs)
-        _apply_low_end_recovery({k: v for k, v in stem_refs.items() if v is not None})
-        _copy_vocals(tmp_path)
-        _emit_separate_progress(on_progress, demucs_label, 0.99)
-
-    out_p = Path(out)
-    if not out_p.exists() or out_p.stat().st_size == 0:
-        raise RuntimeError(f"Guitar stem output missing or empty: {out_p}")
-
+        if vocal_output is not None and stems.get("vocals") is not None:
+            dest = Path(vocal_output)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(stems["vocals"], dest)
+    _emit_separate_progress(on_progress, "Guitar stem ready", 0.99)
     return out

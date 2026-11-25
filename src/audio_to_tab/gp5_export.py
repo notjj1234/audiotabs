@@ -53,7 +53,14 @@ def _note_segments(doc: TabDocument) -> dict[int, list[tuple[int, int, list[tupl
     return measures
 
 
-def _append_beat(voice, start: int, duration: int, notes: list[tuple[TabNote, bool]], tied: bool) -> None:
+def _append_beat(
+    voice,
+    start: int,
+    duration: int,
+    notes: list[tuple[TabNote, bool]],
+    tied: bool,
+    strings: int = 6,
+) -> None:
     import guitarpro
 
     status = guitarpro.BeatStatus.rest if not notes else guitarpro.BeatStatus.normal
@@ -79,7 +86,7 @@ def _append_beat(voice, start: int, duration: int, notes: list[tuple[TabNote, bo
                     guitarpro.Note(
                         beat,
                         value=note.fret,
-                        string=6 - note.string,
+                        string=strings - note.string,
                         type=note_type,
                     )
                 )
@@ -109,17 +116,22 @@ def _assign_tracks(
     return tracks
 
 
-def _fill_measure(voice, groups: list[tuple[int, int, list[tuple[TabNote, bool]]]], measure_ticks: int) -> None:
+def _fill_measure(
+    voice,
+    groups: list[tuple[int, int, list[tuple[TabNote, bool]]]],
+    measure_ticks: int,
+    strings: int = 6,
+) -> None:
     cursor = 0
     for start, end, notes in groups:
         if start < cursor:
             continue
         if start > cursor:
-            _append_beat(voice, cursor, start - cursor, [], tied=False)
-        _append_beat(voice, start, end - start, notes, tied=False)
+            _append_beat(voice, cursor, start - cursor, [], tied=False, strings=strings)
+        _append_beat(voice, start, end - start, notes, tied=False, strings=strings)
         cursor = end
     if cursor < measure_ticks:
-        _append_beat(voice, cursor, measure_ticks - cursor, [], tied=False)
+        _append_beat(voice, cursor, measure_ticks - cursor, [], tied=False, strings=strings)
 
 
 def _gp5_safe_text(value: str, *, fallback: str = "Untitled") -> str:
@@ -159,10 +171,15 @@ def write_guitar_pro(doc: TabDocument, output_path: str | Path, *, title: str) -
         header.timeSignature.numerator = doc.beats_per_measure
         header.start = 960 + index * measure_ticks
 
-    open_pitches = [64, 59, 55, 50, 45, 40]
+    from audio_to_tab.tuning import REFERENCE_OPEN_MIDI
+
+    strings = max(1, len(doc.tuning_names))
+    # GP string 1 is the highest; seed from the reference tuning, then trust the notes.
+    open_pitches = list(reversed(REFERENCE_OPEN_MIDI.get(strings, (40, 45, 50, 55, 59, 64))))
     for event in doc.events:
         for note in event.notes:
-            open_pitches[5 - note.string] = note.pitch - note.fret
+            if 0 <= note.string < strings:
+                open_pitches[strings - 1 - note.string] = note.pitch - note.fret
     for index, track in enumerate(song.tracks):
         track.name = (
             safe_title if index == 0 else _gp5_safe_text(f"{safe_title} (overflow {index})")
@@ -179,6 +196,6 @@ def write_guitar_pro(doc: TabDocument, output_path: str | Path, *, title: str) -
                 track_groups[track_index] if track_index < len(track_groups) else [[], []]
             )
             for voice, groups in zip(measure.voices, voice_groups, strict=True):
-                _fill_measure(voice, groups, measure_ticks)
+                _fill_measure(voice, groups, measure_ticks, strings)
     guitarpro.write(song, str(output))
     return output

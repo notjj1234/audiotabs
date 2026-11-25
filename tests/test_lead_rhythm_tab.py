@@ -313,3 +313,81 @@ class TestVoicingShift:
         first = sorted((n.string, n.fret) for n in out.events[0].notes)
         again = sorted((n.string, n.fret) for n in out.events[2].notes)
         assert first == again
+
+
+def test_lead_path_keeps_whole_chords_aside_but_not_double_stops(tmp_path, monkeypatch):
+    notes = [
+        _note(60, 0.0, 0.4, velocity=50),
+        _note(64, 0.0, 0.4, velocity=110),
+        _note(67, 0.01, 0.4, velocity=30),  # three pitches: a chord
+        _note(62, 1.0, 1.3, velocity=90),
+        _note(69, 1.01, 1.3, velocity=60),  # two pitches: a double-stop
+    ]
+    _patch_transcribe(monkeypatch, notes)
+    audio = tmp_path / "lead.wav"
+    _loud_then_quiet_wav(audio, seconds=4.0)
+    tx = transcribe_lead_stem(audio, tmp_path / "lead.mid")
+    assert [n.pitch for n in tx.notes] == [64, 62]
+    assert [sorted(n.pitch for n in c) for c in tx.chord_attacks] == [[60, 64, 67]]
+
+
+def test_lead_path_keeps_the_fundamental_when_the_loudest_note_is_its_harmonic(tmp_path, monkeypatch):
+    notes = [
+        _note(52, 0.0, 0.4, velocity=60),
+        _note(64, 0.0, 0.4, velocity=110),  # octave partial of 52, reported louder
+        _note(45, 1.0, 1.4, velocity=50),
+        _note(64, 1.01, 1.4, velocity=100),  # octave + fifth (3rd harmonic) of 45
+        _note(62, 2.0, 2.4, velocity=60),
+        _note(69, 2.01, 2.4, velocity=100),  # a fifth is not a harmonic: real double-stop
+    ]
+    _patch_transcribe(monkeypatch, notes)
+    audio = tmp_path / "lead.wav"
+    _loud_then_quiet_wav(audio, seconds=6.0)
+    tx = transcribe_lead_stem(audio, tmp_path / "lead.mid")
+    assert [n.pitch for n in tx.notes] == [52, 45, 69]
+
+
+def test_one_notes_harmonics_are_not_a_chord_but_a_power_chord_is(tmp_path, monkeypatch):
+    notes = [
+        _note(40, 0.0, 0.4), _note(52, 0.0, 0.4), _note(59, 0.01, 0.4),  # 40 + its 2nd/3rd harmonics
+        _note(40, 1.0, 1.4), _note(47, 1.0, 1.4), _note(52, 1.01, 1.4),  # root, fifth, octave
+    ]
+    _patch_transcribe(monkeypatch, notes)
+    audio = tmp_path / "lead.wav"
+    _loud_then_quiet_wav(audio, seconds=4.0)
+    tx = transcribe_lead_stem(audio, tmp_path / "lead.mid")
+    assert [sorted(n.pitch for n in c) for c in tx.chord_attacks] == [[40, 47, 52]]
+
+
+def _sine_wav(path, hz, seconds=1.0, amp=0.3):
+    t = np.arange(int(seconds * SR)) / SR
+    sf.write(str(path), (amp * np.sin(2 * np.pi * hz * t)).astype(np.float32), SR)
+    return path
+
+
+def test_drop_lead_owned_leaves_out_notes_the_lead_part_has_where_the_lead_stem_owns_the_pitch(tmp_path):
+    from audio_to_tab.lead_rhythm_tab import drop_lead_owned
+
+    lead = _sine_wav(tmp_path / "lead.wav", 440.0, seconds=2.0)  # A4 = MIDI 69
+    rhythm = _sine_wav(tmp_path / "rhythm.wav", 110.0, seconds=2.0)  # A2 = MIDI 45
+    lead_part = [_note(69, 0.3, 0.6)]
+    notes = [
+        _note(69, 0.31, 0.6),  # the lead part's note, lead-owned pitch: left out
+        _note(45, 0.3, 0.6),  # rhythm's pitch: kept
+        _note(69, 1.2, 1.5),  # lead-owned pitch the lead part doesn't have: kept, not lost
+        _note(10, 0.3, 0.6),  # below the analysed range: no evidence, kept
+        _note(45, 5.0, 5.3),  # after the stems end: no evidence, kept
+    ]
+
+    kept, left_out = drop_lead_owned(notes, lead_part, lead, rhythm)
+
+    assert [(n.pitch, n.start) for n in kept] == [(45, 0.3), (69, 1.2), (10, 0.3), (45, 5.0)]
+    assert left_out == 1
+    assert drop_lead_owned(notes, [], lead, rhythm) == (notes, 0)
+
+
+def test_repeated_high_rhythm_note_beyond_the_voicing_range_gets_no_canonical_voicing():
+    # A solo note the lead part didn't take can reach the rhythm part; above fret 15 it has
+    # no canonical voicing and must not stop the run.
+    events = _rhythm_chord_events([_note(84, 0.0, 0.3), _note(84, 1.0, 1.3)])
+    assert _canonical_voicing_map(events) == {}

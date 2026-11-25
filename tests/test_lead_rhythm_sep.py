@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from audio_to_tab import roformer
+from audio_to_tab import lead_rhythm_sep, roformer
 from audio_to_tab.lead_rhythm_sep import (
     LEAD_RHYTHM_SPLIT_ID,
     MBR_LEAD_RHYTHM_CKPT_SHA256,
@@ -151,11 +151,28 @@ def test_config_loader_rejects_missing_sample_rate(tmp_path):
         load_mbr_lead_rhythm_config(yaml_path)
 
 
-def test_availability_requires_bs_roformer_melband(monkeypatch):
-    monkeypatch.setattr(roformer, "_is_bs_melband_available", lambda: False)
+def test_availability_needs_every_bundled_model_dependency(monkeypatch):
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda n, *a: None if n == "rotary_embedding_torch" else real(n, *a)
+    )
     assert is_lead_rhythm_split_available() is False
-    monkeypatch.setattr(roformer, "_is_bs_melband_available", lambda: True)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda n, *a: object())
     assert is_lead_rhythm_split_available() is True
+
+
+def test_bundled_model_matches_checkpoint_layout():
+    """The pip MelBand packages hard-code mlp_expansion_factor=4; the checkpoint needs 2."""
+    import inspect
+
+    pytest.importorskip("torch")
+    pytest.importorskip("rotary_embedding_torch")
+    from audio_to_tab.vendor.mel_band_roformer.model import MelBandRoformer
+
+    params = inspect.signature(MelBandRoformer.__init__).parameters
+    assert "mlp_expansion_factor" in params and "skip_connection" in params
 
 
 def test_mode_id_is_stable():
@@ -191,7 +208,7 @@ class TestRunLeadRhythmSplit:
         )
         monkeypatch.setattr(roformer, "_refuse_long_roformer_audio", lambda p: None)
         monkeypatch.setattr(roformer, "_cap_cpu_threads", lambda device: None)
-        monkeypatch.setattr(roformer, "_instantiate_bs_roformer_model", lambda *a, **k: object())
+        monkeypatch.setattr(lead_rhythm_sep, "build_lead_rhythm_model", lambda *a, **k: object())
         monkeypatch.setattr(roformer, "_torch_device", lambda device: device)
 
         calls: dict[str, object] = {}

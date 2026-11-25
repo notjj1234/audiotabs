@@ -12,6 +12,13 @@ STAGES: tuple[tuple[str, str], ...] = (
     ("pdf", "Finalizing PDF"),
 )
 
+ANALYSIS_STAGES: tuple[tuple[str, str], ...] = (
+    ("ingest", "Getting the audio"),
+    ("separate", "Separating instruments"),
+    ("split", "Splitting lead and rhythm guitar"),
+    ("detect", "Checking which instruments play"),
+)
+
 # Heavier weight on long stages so the bar reflects wall time better.
 STAGE_WEIGHTS: dict[str, float] = {
     "ingest": 1.0,
@@ -30,6 +37,13 @@ def new_checklist() -> list[dict[str, str]]:
     return [
         {"id": stage_id, "label": label, "state": "pending", "detail": "", "fraction": ""}
         for stage_id, label in STAGES
+    ]
+
+
+def new_analysis_checklist() -> list[dict[str, str]]:
+    return [
+        {"id": stage_id, "label": label, "state": "pending", "detail": "", "fraction": ""}
+        for stage_id, label in ANALYSIS_STAGES
     ]
 
 

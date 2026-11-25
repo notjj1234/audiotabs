@@ -47,11 +47,13 @@ def save_audio(
         array = array[:, None]
 
     if clip == "rescale":
+        # Same as demucs.audio.prevent_clip: only scale DOWN when the stem would clip.
+        # Normalising every stem to full scale would make a near-silent stem (bleed)
+        # look as loud as the real instrument and break presence detection.
         peak = float(np.max(np.abs(array))) if array.size else 0.0
-        if peak > 0:
-            array = array / peak * 0.99
+        array = array / max(1.01 * peak, 1.0)
     elif clip == "clamp":
-        array = np.clip(array, -1.0, 1.0)
+        array = np.clip(array, -0.99, 0.99)
     elif clip == "tanh":
         array = np.tanh(array)
 

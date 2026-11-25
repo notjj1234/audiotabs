@@ -31,6 +31,7 @@ class RunRecord:
     feedback: dict | None
     source: dict | None
     config: dict | None
+    view: dict | None = None
 
 
 def default_data_dir() -> Path:
@@ -71,6 +72,7 @@ def _record_from_dir(run_dir: Path) -> RunRecord | None:
         feedback=meta.get("feedback") if isinstance(meta.get("feedback"), dict) else None,
         source=meta.get("source") if isinstance(meta.get("source"), dict) else None,
         config=meta.get("config") if isinstance(meta.get("config"), dict) else None,
+        view=meta.get("view") if isinstance(meta.get("view"), dict) else None,
     )
 
 
@@ -152,6 +154,7 @@ def write_run_metadata(
     source: dict | None = None,
     config: dict | None = None,
     feedback: dict | None = None,
+    view: dict | None = None,
 ) -> None:
     """Write ``meta.json`` atomically, preserving keys this call does not set.
 
@@ -173,6 +176,8 @@ def write_run_metadata(
         meta["config"] = config
     if feedback is not None:
         meta["feedback"] = feedback
+    if view is not None:
+        meta["view"] = view
 
     fd, tmp_name = tempfile.mkstemp(dir=run_dir, suffix=".tmp")
     try:

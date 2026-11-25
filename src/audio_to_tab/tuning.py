@@ -9,6 +9,18 @@ STANDARD_TUNING_NAMES = ("E", "A", "D", "G", "B", "e")
 GUITAR_PITCH_MIN = 40  # E2
 GUITAR_PITCH_MAX = 88  # E6
 
+BASS_TUNING_NAME = "Bass standard (EADG)"
+BASS_TUNING_MIDI = (28, 33, 38, 43)  # E1 A1 D2 G2
+BASS_TUNING_NAMES = ("E", "A", "D", "G")
+
+# Low-to-high open strings by string count; writers snap tuning names to these octaves.
+REFERENCE_OPEN_MIDI: dict[int, tuple[int, ...]] = {
+    4: BASS_TUNING_MIDI,
+    5: (23, 28, 33, 38, 43),
+    6: (40, 45, 50, 55, 59, 64),
+    7: (35, 40, 45, 50, 55, 59, 64),
+}
+
 TUNING_PRESETS: dict[str, tuple[tuple[int, ...], tuple[str, ...]]] = {
     "Standard (EADGBE)": (STANDARD_TUNING_MIDI, STANDARD_TUNING_NAMES),
     "Drop D": ((38, 45, 50, 55, 59, 64), ("D", "A", "D", "G", "B", "e")),
@@ -17,7 +29,12 @@ TUNING_PRESETS: dict[str, tuple[tuple[int, ...], tuple[str, ...]]] = {
 
 
 def tuning_preset(name: str) -> tuple[tuple[int, ...], tuple[str, ...]]:
-    """Return ``(open-string MIDI, display names)`` for a tuning that changes frets."""
+    """Return ``(open-string MIDI, display names)`` for a tuning that changes frets.
+
+    Guitar presets (``TUNING_PRESETS``, the user-facing list) plus the bass part's tuning.
+    """
+    if name == BASS_TUNING_NAME:
+        return BASS_TUNING_MIDI, BASS_TUNING_NAMES
     try:
         return TUNING_PRESETS[name]
     except KeyError as exc:

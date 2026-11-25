@@ -80,7 +80,7 @@ export async function apiUpload(
   };
 }
 
-export type AudioKind = 'original' | 'stem' | 'lead' | 'rhythm';
+export type AudioKind = 'original' | 'stem' | 'lead' | 'rhythm' | `part:${string}`;
 
 export function audioUrl(runId: string, kind: AudioKind = 'original'): string {
   const t = getToken();
@@ -102,6 +102,9 @@ export async function downloadExport(
     capo: number;
     transpose: number;
     bars: number;
+    part?: string;
+    all_shown?: boolean;
+    shown?: string[];
   },
 ): Promise<void> {
   const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/export`, {

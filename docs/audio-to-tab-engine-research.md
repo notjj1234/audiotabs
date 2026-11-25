@@ -26,7 +26,7 @@ Songsterr stages from `songsterr-ai-tabs/06-pipeline.md` (Stage 1 is `[inference
 | Intake/trim | Presigned upload, start/end trim hints | ffmpeg normalize + trim | keep | `pipeline.py:_trim_audio` | MIT | trivial | Keep |
 | Separation — guitar from mix | Must produce usable lead+rhythm guitar stems `[inference]` | Demucs htdemucs_6s (default), guitar-ft fine-tune (330 MB), BS-RoFormer SW, SCNet, ensemble | keep guitar-ft/RoFormer path; add Mel-Band RoFormer guitar model | ANALYSIS.md #3; thuhcsi/SCNet; audio-separator | MIT (Demucs code); weights NC historically `[unverified in current README]` | CPU/MPS, RAM-guarded already | Keep+upgrade (P1) |
 | Separation — lead vs rhythm guitar | Two guitar tracks `[observed output]` | Heuristic spatial/register/role gate; emits split only when confident | trained 2-guitar separator (none OSS-proven) | `lead_rhythm.py` header (Foulon 2013, Pati & Lerch 2017) | — | — | Keep heuristic (no OSS model beats it reliably) |
-| Separation — bass/drums/vocals stems | Per-track output stems `[inference]` | Demucs 6s emits them but only guitar+vocals kept | keep htdemucs_6s full stem set | `separate.py` | as above | fine | Keep (P2 wiring) |
+| Separation — bass/drums/vocals stems | Per-track output stems `[inference]` | Demucs 6s emits them but only guitar+vocals kept | keep htdemucs_6s full stem set | `separate.py` | as above | fine | **Done 2026-11-25** — `run_full_separation` keeps all six stems for the instrument picker (§11) |
 | Transcription — guitar notes | Per-stem pitch/onset/duration (+techniques claimed) | Basic Pitch ICASSP 2022 + threshold cleanup | **hppss-tars? no — Practical: keep Basic Pitch but fix thresholds; research models (FretNet, YourMT3) not production-ready for this wiring** | `transcribe.py`; arXiv 2212.03023 (FretNet); arXiv 2407.04822 (YourMT3+) | Apache-2.0 (Basic Pitch) | CPU fast | Keep model (P0 threshold work), replace later only if eval shows gain |
 | Transcription — techniques (bend/vibrato/slide/palm-mute) | Claimed in docs `[unknown]` schema | None | Guitar-TECHS dataset (arXiv 2501.03720) — no ready OSS inference model | docs claim only | dataset CC (paper); model `[unverified]` | — | Out of scope; honest "not supported" label (P2) |
 | Transcription — drums | Drum track in output `[observed]` | None | ADTOF (MZehren/ADTOF) via MDX23C drum stem | github.com/MZehren/ADTOF; xavriley/adtof_plus_drum_transcription | **CC BY-NC-SA 4.0 — non-commercial** | CPU ok | Skip (license + out of single-guitar scope) |
@@ -148,3 +148,54 @@ Automatic Mel-Band selection checks actual model capability, not only package pr
 Final real-audio GP5 validation used the first 60 seconds with automatic model selection and the Demucs fallback. PyGuitarPro parsed the regenerated file successfully: 59 measures, 198 notes, and 32 ties across one track. GP5 note counts include tied continuations and are therefore not expected to equal pipeline note counts. Final verification: `make test` reported 228 passed and 1 skipped; scoped Ruff and `git diff --check` passed.
 
 Lead/Rhythm split: see `docs/lead-rhythm-split.md` (Mel-Band RoFormer `mbr_lead_rhythm_guitar_listra92`, guitar-ft pre-pass, per-stem tabs + MusicXML; integrated 2026-11).
+
+## 11. Instrument parts and vocal de-bleed — 2026-11-25
+
+Spec: `docs/superpowers/specs/2026-11-25-instrument-parts-design.md`.
+
+**Full stem set (P2 wiring, done).** `separate.run_full_separation` runs the 6-stem model once and
+keeps every stem; `postprocess_guitar_stem` builds the tab guitar stem from them. The analysis
+phase caches the stems and the tab job reuses them (`SEPARATION_CALLS` stays at 1 across both,
+covered by `tests/test_pipeline_analysis.py`). The old bleed gate also passed the guitar stem in as
+its own competitor; that is fixed (`tests/test_separate_split.py`).
+
+**Non-guitar parts.** Bass: Basic Pitch on the bass stem (MIDI 28–67, ≤ 2 notes per onset) on a
+4-string EADG tab. Vocals: librosa `pyin` (65–1100 Hz, hop 256) segmented to notes. Piano/keys and
+other: Basic Pitch (21–108). Drums: a heuristic, not a model — rise of linear band energy in
+kick (< 150 Hz), snare (150–2500 Hz) and hi-hat (> 6 kHz) bands, each peak-picked; a hi-hat peak on
+a snare hit is dropped. It finds only those three pieces, no toms or cymbal types, and is labelled
+"rough" in the UI. ADTOF stays skipped (CC BY-NC-SA).
+
+**G4 — vocal de-bleed.** Root cause: the guitar stem carries an attenuated copy of the singer and
+Basic Pitch turns it into guitar notes; MIDI threshold tuning cannot tell them apart. Chosen
+technique: note-level rejection against the vocals stem (`vocal_debleed.py`). A guitar note is
+dropped when the vocal f0 matches its pitch class (unison or ± 1 octave) for ≥ 60 % of its first
+0.5 s, the guitar/vocal magnitude ratio at that pitch is < 0.5, and it fails the unison guard: in its
+first 80 ms the guitar energy *at that pitch* never rises ≥ 2× above the measured bleed
+(bleed gain × vocal energy, frame by frame). The first version used a broadband onset as the guard;
+diagnostics showed it fired on every note (all 16 bleed notes had `pluck=True`), so it was replaced.
+Default: on for separated full mixes with a vocals stem, `vocal_debleed="off"` to disable, no-op on
+solo input; `vocal_debleed_diagnostics.json` lists each removed note with its numbers.
+
+Synthetic fixture (`tests/audio_fixtures.py`: Karplus–Strong guitar, 16 notes incl. one unison with
+the singer; vibrato vocal mixed in at 0.3 ≈ −10 dB), Basic Pitch with the pipeline's full-mix
+thresholds, recall from `scripts/eval_tabs.note_match_f1`:
+
+| Arm | Vocal-pitch notes in guitar tab | Guitar recall | F1 | Unison note kept |
+|---|---:|---:|---:|---|
+| Before | 17 | 1.0000 | 0.6531 | yes |
+| Note-level rejection (default) | 1 | 1.0000 | 0.9697 | yes |
+| Spectral bleed gate, vocals as competitor | 19 | 1.0000 | 0.6275 | yes |
+| Spectral gate then note-level | 2 | 1.0000 | 0.9412 | yes |
+
+The spectral gate trips on only 0.4 % of bins: at 0.3 bleed the vocal holds about 77 % of a bin's
+energy, below the gate's 90 % dominance threshold. It stays off by default. Acceptance (≥ 70 % fewer
+vocal-pitch notes, ≤ 2 left, recall drop ≤ 0.02, unison kept) is asserted by
+`tests/test_vocal_debleed_eval.py`.
+
+Real clip (the user's `フルスピード・ボーイ.mp3`, first 60 s, htdemucs_6s; not copied into the repo):
+de-bleed ran (vocals voiced in 7.3 % of frames, measured bleed gain 0.067) and removed **0** notes.
+Note counts with it on/off were 169/177, but each run separated separately and "balanced" quality
+uses a random shift, so that gap is run-to-run variance, not the stage. On this clip the separator
+left little vocal bleed, so the real-audio evidence shows no false removals but no measured gain;
+a vocal-heavy clip with a reference MIDI is still needed to measure the benefit on real audio.

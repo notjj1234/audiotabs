@@ -20,6 +20,9 @@ class JobRequest(BaseModel):
     trim_start_sec: float = 0.0
     preset: Literal["solo", "full_mix"] = "solo"
     config: dict[str, Any] = Field(default_factory=dict)
+    # Reuse a finished instrument analysis instead of downloading/separating again.
+    analysis_id: str | None = None
+    parts: list[str] | None = None
 
 
 class ExportRequest(BaseModel):
@@ -28,6 +31,17 @@ class ExportRequest(BaseModel):
     capo: int = 0
     transpose: int = 0
     bars: int = 4
+    # Omitted part = today's single-part export, unchanged.
+    part: str | None = None
+    # MIDI / MusicXML only: every part in ``shown`` in one file.
+    all_shown: bool = False
+    shown: list[str] | None = None
+
+
+class ViewState(BaseModel):
+    mode: Literal["single", "together"] = "single"
+    part: str | None = None
+    shown: list[str] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):

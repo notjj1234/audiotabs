@@ -42,6 +42,18 @@ True same-register, fully-simultaneous, dead-centered (identical L=R) overlap
 of two guitars remains architecturally unsolvable without a trained source
 separator — that case correctly stays ``ambiguous`` (out of scope here; adding
 such a model was explicitly excluded).
+
+Role evidence (2026-11 audit against the lead/rhythm role spec): role is recovered
+from texture first (notes per attack, F2 pitch-class change per attack, F5
+competing salience peaks), then contour, with register/sustain/model-confidence
+capped at 10% of the score (``ROLE_WEIGHTS``). Features are always measured on
+the two candidate streams, never on the raw channels of the unsplit stem. A tied
+score, or streams that differ only in register/timbre (``texture_margin`` below
+the role floor), are refused as ``ambiguous`` with no WAVs, in every emit mode.
+Every threshold is listed in ``CONSTANT_PROVENANCE`` (all UNCALIBRATED until
+fitted on labelled segments) and written into the diagnostics. Not done yet:
+segment-level scoring (8-bar windows with hysteresis); features still come from
+the first and last ``ANALYZE_WINDOW_SEC`` of the stem.
 """
 
 from __future__ import annotations
@@ -50,6 +62,7 @@ import json
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field, replace
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 
@@ -99,9 +112,61 @@ MIDSIDE_SIDE_RATIO_MIN = 0.04
 # so identical/near-identical channels (mono duplicated) are still rejected.
 SPATIAL_CORR_RELAXED_MAX = 0.985
 PITCH_DIVERGENCE_SEMITONES_MIN = 3.0
-PITCH_CONFIDENCE_MIN = 0.08
+PITCH_CONFIDENCE_MIN = 0.35
 PITCH_PROXY_FMIN_HZ = 70.0
 PITCH_PROXY_FMAX_HZ = 1500.0
+
+# --- Texture features F2 / F5 (see docs/lead-rhythm-spec in the request brief) ---
+# Notes starting within this window are one attack (strum / chord).
+ONSET_GROUP_SEC = 0.05
+# F5 salience: harmonics summed per candidate f0, and their weights (h=1..5).
+SALIENCE_HARMONICS = 5
+SALIENCE_HARMONIC_DECAY = 0.8
+# A competing salience peak counts when it is within this many dB of the frame max.
+SALIENCE_PEAK_DB = 10.0
+# Salience frame length (seconds; rounded up to a power-of-two FFT).
+SALIENCE_FRAME_SEC = 0.046
+# Spectrum interpolation factor and how far apart two salience peaks must be.
+SALIENCE_ZERO_PAD = 4
+SALIENCE_PEAK_SPAN_SEMIS = 2.0
+# Frames quieter than this (dB below the loudest frame) are not scored.
+SALIENCE_FRAME_FLOOR_DB = 40.0
+# Stems shorter or quieter than this are skipped, not classified.
+MIN_ANALYSIS_SEC = 1.0
+SILENT_RMS = 1e-4
+
+# Provenance of every threshold/weight in this module (ground rule: no invented
+# thresholds). None of them has been fitted to labelled data yet, so all are
+# UNCALIBRATED and are written into the diagnostics so they can be tuned later.
+CONSTANT_PROVENANCE: dict[str, str] = {
+    "SEPARABILITY_FLOOR": "UNCALIBRATED: hand-set guess",
+    "ROLE_MARGIN_MIN": "UNCALIBRATED: hand-set guess",
+    "SPECTRAL_SEPARABILITY_FLOOR": "UNCALIBRATED: hand-set guess",
+    "SPECTRAL_ROLE_MARGIN_MIN": "UNCALIBRATED: hand-set guess",
+    "REGISTER_SEPARABILITY_FLOOR": "UNCALIBRATED: hand-set guess",
+    "MIDSIDE_SEPARABILITY_FLOOR": "UNCALIBRATED: hand-set guess",
+    "SPATIAL_BALANCE_MIN": "UNCALIBRATED: hand-set guess",
+    "SPATIAL_CORR_MAX": "UNCALIBRATED: hand-set guess",
+    "SPATIAL_CORR_RELAXED_MAX": "UNCALIBRATED: hand-set guess",
+    "REGISTER_CROSSOVER_HZ": "UNCALIBRATED: hand-set guess",
+    "MIDSIDE_SIDE_RATIO_MIN": "UNCALIBRATED: hand-set guess",
+    "PITCH_DIVERGENCE_SEMITONES_MIN": "UNCALIBRATED: hand-set guess",
+    "PITCH_CONFIDENCE_MIN": "UNCALIBRATED: share of voiced frames with one dominant salience peak",
+    "PITCH_PROXY_FMIN_HZ": "CALIBRATED: F5 band 70-1500 Hz from the role spec (Salamon & Gomez style)",
+    "PITCH_PROXY_FMAX_HZ": "CALIBRATED: F5 band 70-1500 Hz from the role spec",
+    "ONSET_GROUP_SEC": "UNCALIBRATED: hand-set guess",
+    "SALIENCE_HARMONICS": "CALIBRATED: f0..5f0 from the role spec (F5)",
+    "SALIENCE_HARMONIC_DECAY": "UNCALIBRATED: hand-set guess",
+    "SALIENCE_PEAK_DB": "CALIBRATED: 10 dB from the role spec (F5)",
+    "SALIENCE_FRAME_FLOOR_DB": "UNCALIBRATED: hand-set guess",
+    "SALIENCE_FRAME_SEC": "UNCALIBRATED: hand-set guess (shorter than a 16th note at 160 BPM)",
+    "SALIENCE_ZERO_PAD": "UNCALIBRATED: chosen on synthetic tones only",
+    "SALIENCE_PEAK_SPAN_SEMIS": "UNCALIBRATED: chosen on synthetic tones only",
+    "MIN_ANALYSIS_SEC": "UNCALIBRATED: hand-set guess",
+    "SILENT_RMS": "UNCALIBRATED: hand-set guess",
+    "ROLE_WEIGHTS": "UNCALIBRATED: rubric weights ordered by evidence tier, not fitted",
+    "NORMALISERS": "UNCALIBRATED: feature ranges from the spec's [cal] guesses",
+}
 
 
 @dataclass
@@ -216,38 +281,104 @@ def _rms(x: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(x)) + 1e-12))
 
 
+@dataclass(frozen=True)
+class SalienceStats:
+    """F5 per-frame harmonic-summation salience, summarised over frames."""
+
+    concentration: float  # median of max/sum of the salience curve per frame
+    peak_count: float  # median count of non-octave peaks within SALIENCE_PEAK_DB of the max
+    predominant_hz: float  # median f0 of frames with one dominant peak (0 if none)
+    single_peak_share: float  # share of scored frames with exactly one dominant peak
+    frames: int
+
+
+def salience_stats(mono: np.ndarray, sr: int, *, max_sec: float = 60.0) -> SalienceStats:
+    """
+    F5 ``salience_concentration``: per frame, harmonic summation over f0..5f0 for
+    candidate f0 across 70-1500 Hz (Salamon & Gomez, IEEE TASLP 2012 style), then
+    ``max / sum`` and the number of comparable peaks. A single foregrounded line
+    gives one dominant peak; a chord gives several. Octave-related candidates of
+    the winning f0 (its sub-harmonics share its partials) are not counted as
+    competitors. Plain numpy FFT, no new dependency.
+    """
+    x = np.asarray(mono, dtype=np.float32).reshape(-1)[: int(max_sec * sr)]
+    # ~46 ms frames so one frame rarely spans two notes of a fast line.
+    n_fft = 1 << int(np.ceil(np.log2(max(256, SALIENCE_FRAME_SEC * sr))))
+    hop = n_fft // 4
+    if len(x) < n_fft or sr <= 0:
+        return SalienceStats(0.0, 0.0, 0.0, 0.0, 0)
+    window = np.hanning(n_fft).astype(np.float32)
+    starts = range(0, len(x) - n_fft + 1, hop)
+    frames = np.stack([x[s : s + n_fft] * window for s in starts])
+    # Zero-padding interpolates the spectrum so low notes (bins wider than a
+    # semitone) don't break into false salience peaks.
+    padded = n_fft * SALIENCE_ZERO_PAD
+    mag = np.abs(np.fft.rfft(frames, n=padded, axis=1))
+    energy = np.sum(mag**2, axis=1)
+    if not np.any(energy > 0):
+        return SalienceStats(0.0, 0.0, 0.0, 0.0, 0)
+    loud = energy >= np.max(energy) * 10 ** (-SALIENCE_FRAME_FLOOR_DB / 10)
+    mag = mag[loud]
+
+    # Candidate f0 on a half-semitone grid.
+    n_cand = int(np.floor(24 * np.log2(PITCH_PROXY_FMAX_HZ / PITCH_PROXY_FMIN_HZ))) + 1
+    f0 = PITCH_PROXY_FMIN_HZ * 2 ** (np.arange(n_cand) / 24.0)
+    bin_hz = sr / padded
+    harmonics = np.arange(1, SALIENCE_HARMONICS + 1)
+    bins = np.clip(np.round(np.outer(f0, harmonics) / bin_hz).astype(int), 0, mag.shape[1] - 1)
+    weights = SALIENCE_HARMONIC_DECAY ** (harmonics - 1)
+    salience = np.tensordot(mag[:, bins], weights, axes=([2], [0]))  # frames x candidates
+
+    ratio = 10 ** (-SALIENCE_PEAK_DB / 20)
+    conc: list[float] = []
+    counts: list[int] = []
+    winners: list[float] = []
+    for row in salience:
+        total = float(np.sum(row))
+        if total <= 0:
+            continue
+        top = int(np.argmax(row))
+        conc.append(float(row[top] / total))
+        # A peak must be the highest candidate within +/- SALIENCE_PEAK_SPAN_SEMIS.
+        span = round(SALIENCE_PEAK_SPAN_SEMIS * 2)
+        neighbourhood = np.lib.stride_tricks.sliding_window_view(
+            np.r_[np.zeros(span), row, np.zeros(span)], 2 * span + 1
+        ).max(axis=1)
+        is_peak = (row >= neighbourhood) & (row > 0)
+        strong = np.flatnonzero(is_peak & (row >= row[top] * ratio))
+        semis = np.abs(np.arange(n_cand)[strong] - top) / 2.0
+        # Skip the winner itself and its octave relatives (12, 19, 24 semitones away).
+        octave_rel = np.min(np.abs(semis[:, None] - np.array([0, 12, 19, 24])[None, :]), axis=1) <= 0.5
+        competitors = int(np.sum(~octave_rel)) + 1
+        counts.append(competitors)
+        if competitors == 1:
+            winners.append(float(f0[top]))
+    if not conc:
+        return SalienceStats(0.0, 0.0, 0.0, 0.0, 0)
+    return SalienceStats(
+        concentration=float(np.median(conc)),
+        peak_count=float(np.median(counts)),
+        predominant_hz=float(np.median(winners)) if winners else 0.0,
+        single_peak_share=float(len(winners) / len(counts)),
+        frames=len(counts),
+    )
+
+
 def _dominant_pitch_estimate(mono: np.ndarray, sr: int) -> tuple[float, float]:
     """
-    Cheap "predominant pitch + confidence" proxy computed directly on one
-    channel — no spatial/spectral split required (see module docstring).
+    Predominant pitch + confidence for one channel, from F5 per-frame salience.
 
-    Approximates the predominant-pitch features used by solo/accompaniment
-    guitar classifiers (Pati & Lerch 2017; Foulon et al. 2013): the strongest
-    spectral peak in the guitar-relevant band stands in for predominant pitch,
-    and its share of total spectral magnitude stands in for confidence (a
-    clear, foregrounded single-note voice concentrates energy into one peak;
-    denser/chordal or noisy content spreads it out). Plain FFT peak-picking —
-    same style as ``score_candidate_pair`` / ``_spectral_centroid_hz`` already
-    in this module — so it adds no new dependency and works even without
-    librosa.
+    Replaces the old single-FFT-peak proxy, whose "confidence" (peak/total
+    magnitude) moved with distortion and level and called power chords
+    "confident monophonic". Confidence is now the share of voiced frames with
+    exactly one dominant salience peak; a chord has several comparable peaks.
 
-    Returns (peak_freq_hz, confidence) or (0.0, 0.0) if the signal is too
-    short/quiet to estimate.
+    Returns (predominant_hz, confidence) or (0.0, 0.0) when it can't be estimated.
     """
-    x = np.asarray(mono, dtype=np.float32).reshape(-1)
-    win = min(len(x), sr * 4)
-    if win < 256:
+    stats = salience_stats(mono, sr, max_sec=8.0)
+    if stats.frames == 0 or stats.predominant_hz <= 0:
         return 0.0, 0.0
-    spectrum = np.abs(np.fft.rfft(x[:win] * np.hanning(win)))
-    freqs = np.fft.rfftfreq(win, 1.0 / sr)
-    band = (freqs >= PITCH_PROXY_FMIN_HZ) & (freqs <= PITCH_PROXY_FMAX_HZ)
-    total = float(np.sum(spectrum)) + 1e-12
-    if not np.any(band) or total <= 1e-9:
-        return 0.0, 0.0
-    band_spectrum = spectrum[band]
-    band_freqs = freqs[band]
-    idx = int(np.argmax(band_spectrum))
-    return float(band_freqs[idx]), float(band_spectrum[idx] / total)
+    return stats.predominant_hz, stats.single_peak_share
 
 
 def _pitch_divergence_semitones(freq_a: float, freq_b: float) -> float:
@@ -573,6 +704,24 @@ def score_candidate_pair(a: np.ndarray, b: np.ndarray, sr: int) -> float:
     return float(max(0.0, min(1.0, score)))
 
 
+# One score toward "lead" (rhythm = 1 - lead). Each weight is annotated with its
+# evidence tier from the role spec (texture > contour > salience > timbre).
+# Tiers 9-11 (register, sustain/gain, model confidence) are capped at 10% combined.
+# UNCALIBRATED: ordered by evidence tier, not fitted to labelled segments.
+ROLE_WEIGHTS: dict[str, tuple[float, str]] = {
+    "polyphony": (0.35, "tier 1 High: notes sounding per attack"),
+    "pitch_class_change_rate": (0.30, "tier 2 High: pitch-class set change per attack"),
+    "salience_peaks": (0.15, "tier 5 Medium: competing salience peaks per frame"),
+    "pitch_iqr": (0.10, "tier 4 Medium-high proxy: melodic range of the line"),
+    "pitch_median": (0.04, "tier 10 Low: absolute register (tie-breaker only)"),
+    "sustain": (0.03, "tier 11 Low: note length / sustain"),
+    "mean_velocity": (0.03, "tier 11 Low: Basic Pitch velocity is model confidence"),
+}
+LOW_TIER_FEATURES = ("pitch_median", "sustain", "mean_velocity")
+# Texture-tier features: a split must differ on these, not just on timbre/register.
+TEXTURE_FEATURES = ("polyphony", "pitch_class_change_rate", "salience_peaks", "pitch_iqr")
+
+
 @dataclass
 class RoleFeatures:
     pitch_median: float
@@ -581,34 +730,51 @@ class RoleFeatures:
     polyphony: float
     mean_velocity: float
     sustain: float
+    # F2: share of consecutive attacks whose pitch-class set changes (None = not measured).
+    pitch_class_change_rate: float | None = None
+    # F5: median competing salience peaks per frame and max/sum concentration (None = no audio).
+    salience_peaks: float | None = None
+    salience_concentration: float | None = None
 
-    def lead_score(self) -> float:
-        # Higher pitch, lower polyphony, sparser notes, longer sustain, brighter velocity.
-        pitch_n = min(1.0, max(0.0, (self.pitch_median - 50.0) / 30.0))
-        poly_n = 1.0 - min(1.0, self.polyphony / 3.0)
-        dens_n = 1.0 - min(1.0, self.note_density / 8.0)
-        iqr_n = min(1.0, self.pitch_iqr / 18.0)  # melodic range
-        sust_n = min(1.0, self.sustain / 0.6)
-        vel_n = min(1.0, max(0.0, (self.mean_velocity - 40.0) / 60.0))
-        return (
-            0.35 * pitch_n
-            + 0.20 * poly_n
-            + 0.15 * dens_n
-            + 0.15 * iqr_n
-            + 0.10 * sust_n
-            + 0.05 * vel_n
-        )
+    def normalised(self) -> dict[str, float | None]:
+        """Each measured feature mapped to 0..1 toward "lead" (None = not measured).
+
+        Ranges are the spec's [cal] guesses (UNCALIBRATED): lead polyphony ~1-1.5 vs
+        rhythm ~2.5-4; lead pc-change > 0.55 vs rhythm < 0.35.
+        """
+        sal = None
+        if self.salience_peaks is not None and self.salience_peaks > 0:
+            sal = 1.0 - min(1.0, max(0.0, (self.salience_peaks - 1.0) / 2.0))
+        pcc = self.pitch_class_change_rate
+        return {
+            "polyphony": 1.0 - min(1.0, max(0.0, (self.polyphony - 1.0) / 2.0)),
+            "pitch_class_change_rate": None if pcc is None else min(1.0, max(0.0, pcc)),
+            "salience_peaks": sal,
+            "pitch_iqr": min(1.0, self.pitch_iqr / 18.0),
+            "pitch_median": min(1.0, max(0.0, (self.pitch_median - 50.0) / 30.0)),
+            "sustain": min(1.0, self.sustain / 0.6),
+            "mean_velocity": min(1.0, max(0.0, (self.mean_velocity - 40.0) / 60.0)),
+        }
+
+    def lead_score(self, *, use: frozenset[str] | set[str] | None = None) -> float:
+        """Weighted lead-ness over measured features (weights renormalised); ``use`` limits them."""
+        norm = self.normalised()
+        total = 0.0
+        weight_sum = 0.0
+        for name, (weight, _tier) in ROLE_WEIGHTS.items():
+            if use is not None and name not in use:
+                continue
+            value = norm.get(name)
+            if value is None:
+                continue
+            total += weight * value
+            weight_sum += weight
+        return total / weight_sum if weight_sum > 0 else 0.5
 
     def rhythm_score(self) -> float:
-        pitch_n = 1.0 - min(1.0, max(0.0, (self.pitch_median - 45.0) / 30.0))
-        poly_n = min(1.0, self.polyphony / 3.0)
-        dens_n = min(1.0, self.note_density / 8.0)
-        # Tight pitch IQR and shorter notes → chordal rhythm-like.
-        iqr_n = 1.0 - min(1.0, self.pitch_iqr / 18.0)
-        sust_n = 1.0 - min(1.0, self.sustain / 0.6)
-        return 0.25 * pitch_n + 0.30 * poly_n + 0.25 * dens_n + 0.10 * iqr_n + 0.10 * sust_n
+        return 1.0 - self.lead_score()
 
-    def to_dict(self) -> dict[str, float]:
+    def to_dict(self) -> dict[str, float | None]:
         return {
             "pitch_median": self.pitch_median,
             "pitch_iqr": self.pitch_iqr,
@@ -616,7 +782,31 @@ class RoleFeatures:
             "polyphony": self.polyphony,
             "mean_velocity": self.mean_velocity,
             "sustain": self.sustain,
+            "pitch_class_change_rate": self.pitch_class_change_rate,
+            "salience_peaks": self.salience_peaks,
+            "salience_concentration": self.salience_concentration,
         }
+
+
+def pitch_class_change_rate(notes: list[Any]) -> float | None:
+    """F2: over consecutive attacks, the share whose pitch-class set differs from the last.
+
+    Strumming repeats the same set ({E, G, B}, {E, G, B}...); a lead line changes
+    note almost every attack. None when there are fewer than two attacks.
+    """
+    ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
+    attacks: list[set[int]] = []
+    first = 0.0
+    for note in ordered:
+        if attacks and note.start - first <= ONSET_GROUP_SEC:
+            attacks[-1].add(int(note.pitch) % 12)
+        else:
+            attacks.append({int(note.pitch) % 12})
+            first = note.start
+    if len(attacks) < 2:
+        return None
+    changes = sum(1 for a, b in pairwise(attacks) if a != b)
+    return changes / (len(attacks) - 1)
 
 
 def extract_role_features_from_notes(
@@ -644,7 +834,13 @@ def extract_role_features_from_notes(
         polyphony=poly,
         mean_velocity=float(np.mean(velocities)),
         sustain=float(np.mean(durs)),
+        pitch_class_change_rate=pitch_class_change_rate(notes),
     )
+
+
+def _mean_optional(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return float(sum(present) / len(present)) if present else None
 
 
 def _average_role_features(feats: list[RoleFeatures]) -> RoleFeatures:
@@ -658,6 +854,21 @@ def _average_role_features(feats: list[RoleFeatures]) -> RoleFeatures:
         polyphony=sum(f.polyphony for f in feats) / n,
         mean_velocity=sum(f.mean_velocity for f in feats) / n,
         sustain=sum(f.sustain for f in feats) / n,
+        pitch_class_change_rate=_mean_optional([f.pitch_class_change_rate for f in feats]),
+        salience_peaks=_mean_optional([f.salience_peaks for f in feats]),
+        salience_concentration=_mean_optional([f.salience_concentration for f in feats]),
+    )
+
+
+def _with_salience(feat: RoleFeatures, clip: np.ndarray, sr: int) -> RoleFeatures:
+    """Attach F5 salience measured on the same audio clip."""
+    stats = salience_stats(clip, sr)
+    if stats.frames == 0:
+        return feat
+    return replace(
+        feat,
+        salience_peaks=stats.peak_count,
+        salience_concentration=stats.concentration,
     )
 
 
@@ -702,7 +913,13 @@ def extract_role_features(
             midi_data.write(str(mid_path))
             pm = pretty_midi.PrettyMIDI(str(mid_path))
             notes = [note for inst in pm.instruments for note in inst.notes]
-            feats.append(extract_role_features_from_notes(notes, duration_sec=len(clip) / sr))
+            feats.append(
+                _with_salience(
+                    extract_role_features_from_notes(notes, duration_sec=len(clip) / sr),
+                    clip,
+                    sr,
+                )
+            )
     return _average_role_features(feats)
 
 
@@ -718,20 +935,33 @@ def classify_lead_rhythm_roles(
     Returns (assignment, confidence_margin, detail).
     """
     floor = ROLE_MARGIN_MIN if margin_min is None else float(margin_min)
-    s1 = 0.5 * (feat_a.lead_score() + feat_b.rhythm_score())
-    s2 = 0.5 * (feat_b.lead_score() + feat_a.rhythm_score())
+    # Score both streams over the features measured on BOTH, so a missing feature
+    # on one side never tilts the comparison.
+    norm_a, norm_b = feat_a.normalised(), feat_b.normalised()
+    shared = {name for name in ROLE_WEIGHTS if norm_a.get(name) is not None and norm_b.get(name) is not None}
+    lead_a = feat_a.lead_score(use=shared)
+    lead_b = feat_b.lead_score(use=shared)
+    s1 = 0.5 * (lead_a + (1.0 - lead_b))
+    s2 = 0.5 * (lead_b + (1.0 - lead_a))
     margin = abs(s1 - s2)
+    texture = shared & set(TEXTURE_FEATURES)
+    texture_margin = abs(feat_a.lead_score(use=texture) - feat_b.lead_score(use=texture)) if texture else 0.0
     detail = {
         "stream_a": feat_a.to_dict(),
         "stream_b": feat_b.to_dict(),
+        "normalised_a": norm_a,
+        "normalised_b": norm_b,
+        "weights": {name: {"weight": w, "tier": tier} for name, (w, tier) in ROLE_WEIGHTS.items()},
+        "features_used": sorted(shared),
         "score_a_lead": s1,
         "score_b_lead": s2,
         "margin": margin,
+        "texture_margin": texture_margin,
         "margin_min": floor,
     }
-    if margin < floor:
+    if margin < floor or margin < 1e-9:
         return "ambiguous", float(margin), detail
-    if s1 >= s2:
+    if s1 > s2:
         return "a_lead", float(margin), detail
     return "b_lead", float(margin), detail
 
@@ -767,6 +997,31 @@ def split_lead_rhythm_guitar(
         )
         diag.write_json(diag_path)
         return {"guitar_split_diagnostics": diag_path}, diag
+
+    try:
+        probe, probe_sr = _load_stereo(guitar_path)
+    except Exception as exc:
+        diag = LeadRhythmDiagnostics(
+            outcome="skipped",
+            reason=f"guitar stem unreadable: {exc}",
+            attempted=False,
+            features={"constants": CONSTANT_PROVENANCE},
+        )
+        diag.write_json(diag_path)
+        return {"guitar_split_diagnostics": diag_path}, diag
+    if len(probe) < MIN_ANALYSIS_SEC * probe_sr or _rms(probe) < SILENT_RMS:
+        diag = LeadRhythmDiagnostics(
+            outcome="skipped",
+            reason="guitar stem empty or too short to judge roles",
+            attempted=False,
+            features={
+                "duration_sec": len(probe) / max(1, probe_sr),
+                "constants": CONSTANT_PROVENANCE,
+            },
+        )
+        diag.write_json(diag_path)
+        return {"guitar_split_diagnostics": diag_path}, diag
+    del probe
 
     candidates: list[_CandidatePair] = []
     spatial = build_spatial_pair(guitar_path, thresholds=thr)
@@ -848,12 +1103,10 @@ def split_lead_rhythm_guitar(
     sep_floor = _separability_floor_for(best.method, thr)
     low_sep = best.separability < sep_floor
 
-    if best.method == "spatial" and best.pitch_evidence is None:
-        src_stereo, src_sr = _load_stereo(guitar_path)
-        analyze_a, analyze_b = src_stereo[:, 0], src_stereo[:, 1]
-        analyze_sr = src_sr
-    else:
-        analyze_a, analyze_b, analyze_sr = best.a, best.b, best.sr
+    # Role features always describe the two candidate streams themselves. Raw L/R
+    # of the unsplit stem can each hold both guitars, so their polyphony and
+    # density would describe the sum, not a source.
+    analyze_a, analyze_b, analyze_sr = best.a, best.b, best.sr
 
     if use_basic_pitch:
         feat_a = extract_role_features(analyze_a, analyze_sr, thresholds=thr)
@@ -863,21 +1116,47 @@ def split_lead_rhythm_guitar(
         feat_b = _features_from_audio_stats(analyze_b, analyze_sr, thresholds=thr)
 
     role_floor = _role_floor_for(best.method, thr)
-    # Use a zero margin floor so we always get a directional assignment for emit;
-    # then decide confidence against the real floor.
+    # Zero floor gives the direction of the evidence; confidence is judged
+    # against the real floor below.
     assignment, margin, feat_detail = classify_lead_rhythm_roles(
         feat_a, feat_b, margin_min=0.0
     )
+    feat_detail["constants"] = CONSTANT_PROVENANCE
     if best.pitch_evidence is not None:
         feat_detail["pitch_evidence"] = best.pitch_evidence
+    if best.method == "spatial" and best.pitch_evidence is None:
+        # Per-sample L/R dominance is a distortion, not a separation; only hard-panned
+        # content comes out clean.
+        feat_detail["approximate_separation"] = True
 
-    # If scores are identical (margin ~0), default stream A to lead. Stream A is
-    # the primary slot in every pair builder — midside (mid → lead), register
-    # (high → lead), spatial (left-channel source) — so a_lead is the intended
-    # default for all methods here.
+    # Tied evidence or a split that differs only in register/timbre is not a role
+    # difference: refuse rather than guess (prefer ambiguous over wrong), even in
+    # best-effort mode.
+    texture_margin = float(feat_detail.get("texture_margin") or 0.0)
+    refusal = None
     if assignment == "ambiguous" or margin < 1e-9:
-        assignment = "a_lead"
-        feat_detail["defaulted_assignment"] = True
+        refusal = "role evidence is tied between the two streams"
+    elif texture_margin < role_floor:
+        refusal = (
+            f"streams differ mainly in register/timbre, not texture "
+            f"(texture margin {texture_margin:.3f} below {role_floor})"
+        )
+    if refusal is not None:
+        feat_detail["emit_mode"] = emit_mode
+        feat_detail["skipped_emit"] = True
+        diag = LeadRhythmDiagnostics(
+            outcome="ambiguous",
+            reason=f"Lead/Rhythm not emitted: {refusal}; combined Guitar kept",
+            separability_score=best.separability,
+            role_confidence=margin,
+            method=best.method,
+            correlation=best.correlation,
+            balance_ratio=best.balance_ratio,
+            low_confidence=True,
+            features=feat_detail,
+        )
+        diag.write_json(diag_path)
+        return {"guitar_split_diagnostics": diag_path}, diag
 
     low_role = margin < role_floor
     forced = low_sep or low_role
@@ -1044,13 +1323,17 @@ def _features_from_audio_stats(
         dens = min(8.0, flux * 40.0)
         poly = 1.0 + min(2.0, dens / 4.0)
         feats.append(
-            RoleFeatures(
-                pitch_median=float(pitch),
-                pitch_iqr=6.0,
-                note_density=float(dens),
-                polyphony=float(poly),
-                mean_velocity=80.0,
-                sustain=0.2,
+            _with_salience(
+                RoleFeatures(
+                    pitch_median=float(pitch),
+                    pitch_iqr=6.0,
+                    note_density=float(dens),
+                    polyphony=float(poly),
+                    mean_velocity=80.0,
+                    sustain=0.2,
+                ),
+                clip,
+                sr,
             )
         )
     return _average_role_features(feats)

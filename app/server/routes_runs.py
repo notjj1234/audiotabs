@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 
 from .auth import require_token
 from .errors import http_error
-from .schemas import ExportRequest, FeedbackRequest
+from .schemas import ExportRequest, FeedbackRequest, ViewState
 from .store import RunRecord, delete_run, get_run, list_runs, write_run_metadata
 
 router = APIRouter(dependencies=[Depends(require_token)])
@@ -41,6 +41,7 @@ def _serialize(record: RunRecord) -> dict:
         "feedback": record.feedback,
         "source": record.source,
         "config": record.config,
+        "view": record.view,
         "diagnostics": _load_diagnostics(record),
     }
 
@@ -100,7 +101,7 @@ def api_run_score(
 
 @router.post("/api/runs/{run_id}/export")
 def api_run_export(run_id: str, body: ExportRequest, request: Request) -> FileResponse:
-    from .score import export_run
+    from .score import UnsupportedExport, export_run
 
     record = _require_run(request, run_id)
     exports_root = _data_dir(request) / "exports"
@@ -113,11 +114,37 @@ def api_run_export(run_id: str, body: ExportRequest, request: Request) -> FileRe
             transpose=body.transpose,
             bars=body.bars,
             exports_root=exports_root,
+            part=body.part,
+            all_shown=body.all_shown,
+            shown=body.shown,
         )
+    except UnsupportedExport as exc:
+        raise http_error(422, code="export_unsupported", message=str(exc)) from exc
     except FileNotFoundError as exc:
         raise http_error(404, code="export_missing", message=str(exc)) from exc
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return FileResponse(path, filename=path.name, media_type=media_type)
+
+
+@router.put("/api/runs/{run_id}/view")
+def api_run_view(run_id: str, body: ViewState, request: Request) -> dict:
+    """Remember Single/Together and which parts are shown, so a reopened run looks the same."""
+    from .parts import available_parts
+
+    record = _require_run(request, run_id)
+    parts = available_parts(record)
+    shown = [p for p in dict.fromkeys(body.shown) if p in parts]
+    view = {
+        "mode": body.mode,
+        "part": body.part if body.part in parts else (shown[0] if shown else parts[0]),
+        "shown": shown,
+    }
+    write_run_metadata(
+        record.dir, page="tab_pdf", title=record.title, artifacts=record.artifacts, view=view
+    )
+    updated = get_run(_data_dir(request), run_id)
+    assert updated is not None
+    return _serialize(updated)
 
 
 @router.post("/api/runs/{run_id}/feedback")
@@ -149,7 +176,15 @@ def api_run_audio(
         "lead": "lead_guitar",
         "rhythm": "rhythm_guitar",
     }
-    key = key_map.get(kind_key, "playback")
+    if kind_key.startswith("part:"):
+        from .parts import REGISTRY
+
+        spec = REGISTRY.get(kind_key.split(":", 1)[1])
+        if spec is None:
+            raise http_error(404, code="audio_missing", message="Audio not available for this part.")
+        key = spec.audio_key
+    else:
+        key = key_map.get(kind_key, "playback")
     path = record.artifacts.get(key)
     if path is None or not Path(path).is_file():
         # Original listen often uses playback; fall back

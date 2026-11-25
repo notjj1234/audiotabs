@@ -36,6 +36,7 @@ _ALLOWED_CONFIG = {
     "adaptive_fold_gain",
     "guitar_ensemble",
     "demucs_device",
+    "vocal_debleed",
 }
 
 _DEVICES = frozenset({"cpu", "cuda", "mps"})
@@ -66,7 +67,7 @@ def _resolve_upload(data_dir: Path, upload_id: str) -> Path:
     return files[0]
 
 
-def _build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
+def build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
     """Build a PipelineConfig-shaped namespace without importing the engine."""
     raw = dict(body.config or {})
     unknown = sorted(set(raw) - _ALLOWED_CONFIG)
@@ -141,6 +142,7 @@ def _build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
         bleed_gate=bool(raw.get("bleed_gate")),
         adaptive_fold_gain=bool(raw.get("adaptive_fold_gain")),
         guitar_ensemble=bool(raw.get("guitar_ensemble")),
+        vocal_debleed=str(raw.get("vocal_debleed") or "auto"),
         demucs_device=demucs_device,
         export_gp5=True,
         lead_rhythm_split=str(raw.get("model") or "") == "lead_rhythm_split",
@@ -160,44 +162,110 @@ def _build_config(body: JobRequest) -> tuple[SimpleNamespace, dict]:
     return config, meta
 
 
-@router.post("/api/jobs", status_code=202, response_model=None)
-def api_create_job(body: JobRequest, request: Request):
-    data_dir = Path(request.app.state.data_dir)
+def resolve_source(body: JobRequest, data_dir: Path) -> tuple[Path | None, str | None, dict]:
+    """Turn the request source into (audio_path, youtube_url, source meta). Raises HTTP errors."""
     audio_path: Path | None = None
     youtube_url: str | None = None
     source = {"kind": body.source.kind}
+    if body.source.kind == "upload":
+        if not body.source.upload_id:
+            raise http_error(400, code="missing_source", message="Choose an audio file.")
+        audio_path = _resolve_upload(data_dir, body.source.upload_id)
+        source["upload_id"] = body.source.upload_id
+        source["name"] = audio_path.name
+    elif body.source.kind == "youtube":
+        youtube_url = (body.source.youtube_url or "").strip()
+        if not youtube_url:
+            raise http_error(400, code="missing_source", message="Paste a YouTube link.")
+        source["youtube_url"] = youtube_url
+    elif body.source.kind == "media_url":
+        media_url = (body.source.media_url or "").strip()
+        if not media_url:
+            raise http_error(400, code="missing_source", message="Paste a media URL.")
+        dest = data_dir / "uploads" / str(__import__("uuid").uuid4())
+        dest.mkdir(parents=True, exist_ok=True)
+        audio_path = download_direct_media(media_url, dest)
+        source["media_url"] = media_url
+        source["name"] = audio_path.name
+    else:
+        raise http_error(400, code="missing_source", message="Choose a source.")
+    return audio_path, youtube_url, source
 
+
+def resolve_source_or_response(body: JobRequest, data_dir: Path):
+    """resolve_source, but non-HTTP failures (e.g. download errors) become a 400 JSON body."""
     try:
-        if body.source.kind == "upload":
-            if not body.source.upload_id:
-                raise http_error(400, code="missing_source", message="Choose an audio file.")
-            audio_path = _resolve_upload(data_dir, body.source.upload_id)
-            source["upload_id"] = body.source.upload_id
-            source["name"] = audio_path.name
-        elif body.source.kind == "youtube":
-            youtube_url = (body.source.youtube_url or "").strip()
-            if not youtube_url:
-                raise http_error(400, code="missing_source", message="Paste a YouTube link.")
-            source["youtube_url"] = youtube_url
-        elif body.source.kind == "media_url":
-            media_url = (body.source.media_url or "").strip()
-            if not media_url:
-                raise http_error(400, code="missing_source", message="Paste a media URL.")
-            dest = data_dir / "uploads" / str(__import__("uuid").uuid4())
-            dest.mkdir(parents=True, exist_ok=True)
-            audio_path = download_direct_media(media_url, dest)
-            source["media_url"] = media_url
-            source["name"] = audio_path.name
-        else:
-            raise http_error(400, code="missing_source", message="Choose a source.")
+        return resolve_source(body, data_dir), None
     except Exception as exc:
         if hasattr(exc, "status_code"):
             raise
-        return __import__("fastapi").responses.JSONResponse(
+        return None, __import__("fastapi").responses.JSONResponse(
             status_code=400, content=error_body(exc)
         )
 
-    config, config_meta = _build_config(body)
+
+def _create_from_analysis(body: JobRequest, request: Request) -> dict:
+    from audio_to_tab.analysis import analysis_fingerprint
+    from audio_to_tab.pipeline import KNOWN_PARTS
+
+    from .analyses import AnalysisManager
+    from .jobs import pipeline_config_from
+
+    manager = getattr(request.app.state, "analyses", None)
+    if manager is None:
+        manager = AnalysisManager(Path(request.app.state.data_dir))
+        request.app.state.analyses = manager
+    analysis_id = str(body.analysis_id)
+    bundle = manager.bundle(analysis_id)
+    if bundle is None:
+        raise http_error(
+            404,
+            code="analysis_missing",
+            message="The instrument check for this song is no longer available. Convert again.",
+        )
+    if body.parts is not None and not body.parts:
+        raise http_error(422, code="no_parts", message="Choose at least one part to tab.")
+    unknown = [p for p in (body.parts or []) if p not in KNOWN_PARTS]
+    if unknown:
+        raise http_error(422, code="bad_parts", message=f"Unknown part: {unknown[0]}")
+    config, config_meta = build_config(body)
+    pipeline_config = pipeline_config_from(config)
+    fingerprint = analysis_fingerprint(
+        bundle.source, pipeline_config, float(body.trim_start_sec or 0.0)
+    )
+    if fingerprint != bundle.fingerprint:
+        raise http_error(
+            409,
+            code="analysis_mismatch",
+            message="These settings change how instruments are separated. Check the instruments again.",
+        )
+    manager.mark_in_use(analysis_id)
+    job = _jobs(request).start(
+        title=config.title,
+        audio_path=None,
+        youtube_url=None,
+        config=pipeline_config,
+        source=dict(bundle.source),
+        config_meta={**config_meta, "parts": list(body.parts or [])},
+        analysis=bundle,
+        parts=None if body.parts is None else list(body.parts),
+        on_success=lambda: manager.consume(analysis_id),
+        on_end=lambda: manager.release(analysis_id),
+    )
+    return {"job_id": job.id, "state": job.state}
+
+
+@router.post("/api/jobs", status_code=202, response_model=None)
+def api_create_job(body: JobRequest, request: Request):
+    if body.analysis_id:
+        return _create_from_analysis(body, request)
+    data_dir = Path(request.app.state.data_dir)
+    resolved, failure = resolve_source_or_response(body, data_dir)
+    if failure is not None:
+        return failure
+    audio_path, youtube_url, source = resolved
+
+    config, config_meta = build_config(body)
     job = _jobs(request).start(
         title=config.title,
         audio_path=audio_path,
@@ -215,3 +283,30 @@ def api_get_job(job_id: str, request: Request) -> dict:
     if snap is None:
         raise http_error(404, code="job_missing", message="Job not found.")
     return snap
+
+
+@router.post("/api/jobs/{job_id}/retry", status_code=202)
+def api_retry_job(job_id: str, request: Request) -> dict:
+    manager = _jobs(request)
+    if manager.snapshot(job_id) is None:
+        raise http_error(
+            404,
+            code="job_missing",
+            message="This conversion is no longer available. Go back and start it again.",
+        )
+    job = manager.retry(job_id)
+    if job is None:
+        raise http_error(
+            409,
+            code="retry_unavailable",
+            message="This conversion can't be retried. Go back and start it again.",
+        )
+    return {"job_id": job.id, "state": job.state}
+
+
+@router.post("/api/jobs/{job_id}/cancel", status_code=202)
+def api_cancel_job(job_id: str, request: Request) -> dict:
+    job = _jobs(request).cancel(job_id)
+    if job is None:
+        raise http_error(404, code="job_missing", message="Job not found.")
+    return {"job_id": job.id, "state": job.state}
