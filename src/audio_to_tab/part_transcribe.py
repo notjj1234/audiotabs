@@ -92,6 +92,7 @@ def _pitched(part_id: str, stem: Path, out_dir: Path, cfg: Any) -> tuple[str, di
             quantize_sec=None,
         ),
         normalize=False,
+        allow_yourmt3=False,  # measured on guitar only (docs/guitar-separation-eval.md)
     )
     pm = pretty_midi.PrettyMIDI(str(midi_path))
     notes = [n for inst in pm.instruments for n in inst.notes]

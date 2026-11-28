@@ -40,3 +40,4 @@ graphify-out/
 # Local tooling artifacts
 .impeccable/
 .superpowers/
+*.local.md

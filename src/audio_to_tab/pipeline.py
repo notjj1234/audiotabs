@@ -36,6 +36,7 @@ from audio_to_tab.tab_bundle import (
 )
 from audio_to_tab.tempo import resolve_tempo
 from audio_to_tab.transcribe import transcribe_audio
+from audio_to_tab.yourmt3 import abort_scope as yourmt3_abort_scope
 
 logger = logging.getLogger(__name__)
 
@@ -682,6 +683,10 @@ def _apply_role_check(
     )
     # The lead path stays one note at a time, as its transcription is.
     lead_notes = lead_rhythm_tab._lead_monophonic(lead_notes)
+    kept_lead = {(round(n.start, 3), n.pitch) for n in lead_notes}
+    report.notes = [
+        d for d in report.notes if d["role"] != "lead" or (d["start"], d["pitch"]) in kept_lead
+    ]
     roles_path = output_dir / "lead_rhythm_roles.json"
     roles_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
     if report.moves or report.bleed_removed or report.chords_to_rhythm:
@@ -1064,6 +1069,32 @@ def run_pipeline(
     reused — nothing is downloaded or separated again — and only ``parts`` are
     tabbed. A ``parts.json`` artifact lists the parts the result shows.
     """
+    with yourmt3_abort_scope(cancel.is_cancelled if cancel is not None else None):
+        return _run_pipeline(
+            audio_path=audio_path,
+            youtube_url=youtube_url,
+            output_dir=output_dir,
+            config=config,
+            on_progress=on_progress,
+            include_tab_source=include_tab_source,
+            cancel=cancel,
+            analysis=analysis,
+            parts=parts,
+        )
+
+
+def _run_pipeline(
+    *,
+    audio_path: Path | None,
+    youtube_url: str | None,
+    output_dir: Path,
+    config: PipelineConfig | None,
+    on_progress: ProgressCallback | None,
+    include_tab_source: bool,
+    cancel: CancelToken | None,
+    analysis: Any,
+    parts: list[str] | None,
+) -> dict[str, Path]:
     if analysis is None:
         return _run_guitar_pipeline(
             audio_path=audio_path,

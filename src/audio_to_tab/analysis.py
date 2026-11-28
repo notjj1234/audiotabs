@@ -30,6 +30,8 @@ from audio_to_tab.cancel import CancelToken
 from audio_to_tab.ingest import download_youtube_audio, normalize_audio
 from audio_to_tab.inventory import LeadRhythmOutcome, PartCandidate, build_inventory
 from audio_to_tab.isolate import StemPresence, detect_present_stems
+from audio_to_tab.lead_rhythm_sep import LEAD_RHYTHM_SPLIT_ID
+from audio_to_tab.roformer import BS_ROFORMER_SW_ID, split_stage1_skip_reason
 from audio_to_tab.separate import (
     GUITAR_FT_CHECKPOINT_ID,
     guitar_ft_weights_cached,
@@ -84,15 +86,33 @@ def analysis_fingerprint(source: dict[str, Any], config: Any, trim_start_sec: fl
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def analysis_separation_model(config: Any) -> tuple[str, str | None]:
-    """The analysis always runs a 6-stem separator so every instrument is kept."""
+def _device(config: Any) -> str:
+    return str(getattr(config, "demucs_device", "cpu") or "cpu")
+
+
+def _demucs_separation_model(config: Any) -> tuple[str, str | None]:
     model = str(getattr(config, "model", "") or "")
     checkpoint = getattr(config, "guitar_checkpoint", None)
-    if model == "bs_roformer_sw":
-        return model, None
     if model == "lead_rhythm_split" and checkpoint is None and guitar_ft_weights_cached():
         checkpoint = GUITAR_FT_CHECKPOINT_ID
     return "htdemucs_6s", checkpoint
+
+
+def _split_stage1_skip_reason(config: Any) -> str | None:
+    """Why the Lead/Rhythm split doesn't get BS-RoFormer SW's guitar stem (None = it does)."""
+    if getattr(config, "guitar_checkpoint", None) is not None:
+        return "a Demucs guitar checkpoint was chosen"
+    return split_stage1_skip_reason(_device(config))
+
+
+def analysis_separation_model(config: Any) -> tuple[str, str | None]:
+    """The analysis always runs a 6-stem separator so every instrument is kept."""
+    model = str(getattr(config, "model", "") or "")
+    if model == BS_ROFORMER_SW_ID:
+        return model, None
+    if model == LEAD_RHYTHM_SPLIT_ID and _split_stage1_skip_reason(config) is None:
+        return BS_ROFORMER_SW_ID, None
+    return _demucs_separation_model(config)
 
 
 def _trim(raw: Path, start_sec: float, max_duration_sec: float | None) -> Path:
@@ -197,20 +217,43 @@ def _run(
         work_audio = root / "source.wav"
         shutil.copy2(work, work_audio)
 
+    def separate(model: str, checkpoint: str | None) -> dict[str, Path]:
+        return run_full_separation(
+            work_audio,
+            root / "stems",
+            model=model,
+            guitar_checkpoint=checkpoint,
+            device=_device(config),
+            quality=str(getattr(config, "demucs_quality", "balanced") or "balanced"),
+            demucs_segment=getattr(config, "demucs_segment", 8),
+            demucs_jobs=int(getattr(config, "demucs_jobs", 1) or 1),
+            should_abort=cancel.is_cancelled,
+            on_progress=lambda message, fraction: progress("separate", message, fraction),
+        )
+
     model, checkpoint = analysis_separation_model(config)
+    separation: dict[str, Any] = {"model": model}
+    split_requested = str(getattr(config, "model", "") or "") == LEAD_RHYTHM_SPLIT_ID
+    if split_requested and model != BS_ROFORMER_SW_ID:
+        separation["roformer_skipped"] = _split_stage1_skip_reason(config)
     progress("separate", "Separating instruments", 0.1)
-    stems = run_full_separation(
-        work_audio,
-        root / "stems",
-        model=model,
-        guitar_checkpoint=checkpoint,
-        device=str(getattr(config, "demucs_device", "cpu") or "cpu"),
-        quality=str(getattr(config, "demucs_quality", "balanced") or "balanced"),
-        demucs_segment=getattr(config, "demucs_segment", 8),
-        demucs_jobs=int(getattr(config, "demucs_jobs", 1) or 1),
-        should_abort=cancel.is_cancelled,
-        on_progress=lambda message, fraction: progress("separate", message, fraction),
-    )
+    try:
+        stems = separate(model, checkpoint)
+    except JobAborted:
+        raise
+    except Exception as exc:
+        # Only the automatic RoFormer upgrade falls back; a chosen engine fails as before.
+        if not (split_requested and model == BS_ROFORMER_SW_ID):
+            raise
+        logger.warning("BS-RoFormer SW failed; separating with Demucs instead: %s", exc)
+        shutil.rmtree(root / "stems", ignore_errors=True)
+        model, checkpoint = _demucs_separation_model(config)
+        separation = {
+            "model": model,
+            "fallback_from": BS_ROFORMER_SW_ID,
+            "fallback_reason": str(exc)[:500],
+        }
+        stems = separate(model, checkpoint)
 
     progress("split", "Splitting lead and rhythm guitar", 0.05)
     lead_rhythm_paths: dict[str, Path] = {}
@@ -274,6 +317,7 @@ def _run(
             "created_at": time.time(),
             "fingerprint": bundle.fingerprint,
             "model": model,
+            "separation": separation,
             "source": bundle.source,
             "work_audio": _rel(work_audio, root),
             "stems": {name: _rel(path, root) for name, path in stems.items()},

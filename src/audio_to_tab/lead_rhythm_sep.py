@@ -285,6 +285,7 @@ class LeadRhythmSplitDiagnostics:
     envelope_correlation: float | None = None
     warnings: list[str] = field(default_factory=list)
     vocal_suppression: dict | None = None  # vocal_debleed.guitar_for_split report
+    stereo_presplit: dict | None = None  # guitar_roles_stereo report when ATT_STEREO_PRESPLIT=1
 
     def to_dict(self) -> dict:
         return {
@@ -300,6 +301,7 @@ class LeadRhythmSplitDiagnostics:
             "envelope_correlation": self.envelope_correlation,
             "warnings": list(self.warnings),
             "vocal_suppression": self.vocal_suppression,
+            "stereo_presplit": self.stereo_presplit,
         }
 
     @classmethod
@@ -320,6 +322,7 @@ class LeadRhythmSplitDiagnostics:
             envelope_correlation=data.get("envelope_correlation"),
             warnings=[str(w) for w in (data.get("warnings") or [])],
             vocal_suppression=data.get("vocal_suppression"),
+            stereo_presplit=data.get("stereo_presplit"),
         )
 
     def write_json(self, path: Path) -> Path:
@@ -478,18 +481,20 @@ def run_lead_rhythm_split(
     try:
         _prog("Splitting lead and rhythm guitars", 0.35)
         mix = roformer._load_audio_stereo(guitar_path, model_sr)
+        model_input, presplit = _centre_for_split(mix)
         dev = roformer._torch_device(device)
         roformer._cap_cpu_threads(device)
         model = build_lead_rhythm_model(config, ckpt_path, dev)
         sources = roformer._demix_track(
             model,
-            mix,
+            model_input,
             device=dev,
             chunk_size=chunk_size,
             n_overlap=n_overlap,
             num_stems=1,
         )
         lead = sources[0]
+        # Residual of the full input, so side content the model never saw stays in rhythm.
         rhythm = mix - lead
         _prog("Writing lead and rhythm stems", 0.85)
         artifacts = roformer._write_stems(
@@ -509,5 +514,22 @@ def run_lead_rhythm_split(
         model_sample_rate=model_sr,
         resampled=resampled,
     )
+    diag.stereo_presplit = presplit
     _prog("Lead/rhythm split complete", 0.99)
     return artifacts, diag
+
+
+def _centre_for_split(mix: np.ndarray) -> tuple[np.ndarray, dict | None]:
+    """The model input: the stereo centre candidate when ATT_STEREO_PRESPLIT is on, else ``mix``.
+
+    ``mix`` is (channels, samples). Returns the input and the pre-split report (None when off).
+    """
+    from audio_to_tab.guitar_roles_stereo import presplit_array, stereo_presplit_enabled
+
+    if not stereo_presplit_enabled():
+        return mix, None
+    centre, _side, result = presplit_array(mix.T)
+    logger.info("Stereo pre-split before the Lead/Rhythm model: %s", result.reason)
+    if centre is None:
+        return mix, result.to_dict()
+    return np.ascontiguousarray(centre.T, dtype=np.float32), result.to_dict()

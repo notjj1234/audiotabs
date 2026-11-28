@@ -113,3 +113,59 @@ def test_backend_missing_fails_loud(tmp_path, monkeypatch):
             tmp_path / "out",
             IsolateConfig(model="lead_rhythm_split", emit_metronome=False),
         )
+
+
+def _roformer_host(monkeypatch, *, available: bool = True):
+    import audio_to_tab.roformer as roformer
+
+    monkeypatch.delenv("ATT_SPLIT_STAGE1", raising=False)
+    monkeypatch.setattr(roformer, "is_roformer_available", lambda: available)
+
+
+def test_prepass_uses_bs_roformer_on_gpu(tmp_path, monkeypatch):
+    captured: dict = {}
+    _patch_split(monkeypatch, captured)
+    _patch_separate(monkeypatch, captured)
+    _roformer_host(monkeypatch)
+    out = tmp_path / "out"
+
+    separate_stems(
+        _src(tmp_path),
+        out,
+        IsolateConfig(model="lead_rhythm_split", device="mps", emit_metronome=False),
+    )
+
+    assert captured["separate_kwargs"]["model"] == "bs_roformer_sw"
+    assert captured["separate_kwargs"].get("guitar_checkpoint") is None
+    assert captured["split_input"] == out / "guitar_stem.wav"
+
+
+def test_prepass_roformer_failure_falls_back_to_guitar_ft(tmp_path, monkeypatch):
+    captured: dict = {}
+    _patch_split(monkeypatch, captured)
+    _roformer_host(monkeypatch)
+    models: list[str] = []
+
+    def fake_separate(audio_path, output_path=None, **kwargs):
+        models.append(kwargs["model"])
+        if kwargs["model"] == "bs_roformer_sw":
+            raise RuntimeError("RoFormer refused this file")
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(out), np.zeros((SR, 2), dtype=np.float32), SR)
+        captured["separate_kwargs"] = kwargs
+        return out
+
+    import audio_to_tab.separate as separate_mod
+
+    monkeypatch.setattr(separate_mod, "separate_guitar_stem", fake_separate)
+
+    artifacts = separate_stems(
+        _src(tmp_path),
+        tmp_path / "out",
+        IsolateConfig(model="lead_rhythm_split", device="mps", emit_metronome=False),
+    )
+
+    assert models == ["bs_roformer_sw", "htdemucs_6s"]
+    assert captured["separate_kwargs"]["guitar_checkpoint"] == GUITAR_FT_CHECKPOINT_ID
+    assert Path(artifacts["lead_guitar"]).is_file()

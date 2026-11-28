@@ -86,6 +86,28 @@ def is_roformer_available() -> bool:
     return importlib.util.find_spec("bs_roformer") is not None
 
 
+SPLIT_STAGE1_ENV = "ATT_SPLIT_STAGE1"
+_GPU_DEVICES = ("cuda", "mps")
+
+
+def split_stage1_skip_reason(device: str) -> str | None:
+    """None when BS-RoFormer SW should make the guitar stem the Lead/Rhythm split gets.
+
+    Its guitar stem scores ~9 dB SDR vs ~5 dB for htdemucs_6s (MVSEP guitar leaderboard),
+    and the split can't be better than its input. CPU-only hosts keep Demucs because
+    RoFormer is impractically slow there; ``ATT_SPLIT_STAGE1=bs_roformer_sw`` forces it and
+    ``ATT_SPLIT_STAGE1=demucs`` turns it off.
+    """
+    override = os.environ.get(SPLIT_STAGE1_ENV, "").strip().lower()
+    if override in ("demucs", "htdemucs_6s"):
+        return f"{SPLIT_STAGE1_ENV}={override}"
+    if not is_roformer_available():
+        return "bs-roformer-infer is not installed"
+    if override != BS_ROFORMER_SW_ID and not str(device or "").lower().startswith(_GPU_DEVICES):
+        return "no GPU (BS-RoFormer is too slow on CPU)"
+    return None
+
+
 def is_audio_separator_available() -> bool:
     """True when ``python-audio-separator`` is importable (heavy UVR stack)."""
     return importlib.util.find_spec("audio_separator") is not None

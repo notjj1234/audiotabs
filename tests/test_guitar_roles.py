@@ -2,7 +2,16 @@
 
 from dataclasses import dataclass
 
-from audio_to_tab.guitar_roles import assign_roles, bar_features, bar_starts, texture_label
+from audio_to_tab import guitar_roles
+from audio_to_tab.guitar_roles import (
+    DEFAULT_ROLE_CONFIG,
+    RoleConfig,
+    accept_moves,
+    assign_roles,
+    bar_features,
+    bar_starts,
+    texture_label,
+)
 
 BAR = 2.0  # 120 BPM, 4/4
 
@@ -137,3 +146,72 @@ def test_lead_stem_chord_over_a_rhythm_strum_is_left_alone():
     assert report.chords_to_rhythm == 0 and report.chords_left == 1
     assert len(new_rhythm) == len(rhythm)
     assert len(new_lead) == len(lead)
+
+
+# --- one config, hysteresis, per-note roles ---------------------------------------------------
+
+TRIAD = (48, 52, 55)  # C major: spells out a triad, unlike a power chord
+BEND = [69, 70, 71, 70, 69, 67, 69, 72]  # a bend split into semitone steps, as Basic Pitch does
+
+
+def test_config_defaults_are_the_module_constants():
+    cfg = DEFAULT_ROLE_CONFIG
+    assert cfg.onset_group_sec == guitar_roles.ONSET_GROUP_SEC
+    assert cfg.repeat_similar == guitar_roles.REPEAT_SIMILAR
+    assert cfg.strong_line_events == guitar_roles.STRONG_LINE_EVENTS
+    assert cfg.min_run_bars == guitar_roles.MIN_RUN_BARS == 2
+
+
+def test_hysteresis_needs_a_run_of_agreeing_bars_unless_the_bar_is_strong():
+    weak, strong = ("to_lead", "r", False), ("to_lead", "r", True)
+    assert accept_moves([None, weak, None]) == [None, None, None]
+    assert accept_moves([weak, weak, None]) == [("to_lead", "r"), ("to_lead", "r"), None]
+    assert accept_moves([weak, weak], min_run_bars=3) == [None, None]
+    assert accept_moves([None, strong, None], min_run_bars=3) == [None, ("to_lead", "r"), None]
+    # A run only counts bars that want the same move.
+    assert accept_moves([weak, ("to_rhythm", "r", False)]) == [None, None]
+
+
+def test_min_run_bars_comes_from_the_config():
+    rhythm = [*chords(0), *chords(1), *line(2, SOLO_A), *line(3, SOLO_B)]
+    lead = line(0, SOLO_B[:1])
+    no_strong = RoleConfig(strong_line_events=99)
+    _, _, two = assign_roles(lead, rhythm, downbeats=[0, 2, 4, 6, 8], config=no_strong)
+    _, _, three = assign_roles(
+        lead, rhythm, downbeats=[0, 2, 4, 6, 8], config=RoleConfig(strong_line_events=99, min_run_bars=3)
+    )
+    assert [m.bar for m in two.moves] == [3, 4]
+    assert three.moves == []
+
+
+def test_strummed_chords_stay_rhythm_note_by_note():
+    rhythm = [*chords(0, TRIAD), *chords(1, TRIAD)]
+    lead = [*line(0, SOLO_A), *line(1, SOLO_B)]
+    _, _, report = _run(lead, rhythm, bars=2)
+    rhythm_entries = [d for d in report.notes if d["role"] == "rhythm"]
+    lead_entries = [d for d in report.notes if d["role"] == "lead"]
+    assert len(rhythm_entries) == len(rhythm) and len(lead_entries) == len(lead)
+    assert all(d["source"] == "split" for d in report.notes)
+    assert "confidence" not in report.notes[0]
+
+
+def test_bent_single_notes_filed_as_rhythm_move_to_lead():
+    rhythm = [*chords(0, TRIAD), *chords(1, TRIAD), *line(2, BEND), *line(3, SOLO_B)]
+    new_lead, _, report = _run([], rhythm)
+    assert [m.bar for m in report.moves] == [3, 4]
+    bent = [d for d in report.notes if 2 * BAR <= d["start"] < 3 * BAR]
+    assert {d["pitch"] for d in bent} == set(BEND)
+    assert all(d["role"] == "lead" and d["source"] == "moved_bar" for d in bent)
+    assert set(BEND) <= {n.pitch for n in new_lead}
+
+
+def test_notes_record_chords_routed_from_the_lead_stem():
+    chord = [N(52, 4.0, 4.5), N(55, 4.0, 4.5), N(59, 4.01, 4.5)]
+    lead = [*line(0, SOLO_A), N(55, 4.0, 4.5)]
+    _, _, report = assign_roles(lead, chords(0), downbeats=[0, 2, 4, 6], lead_chords=[chord])
+    routed = [d for d in report.notes if abs(d["start"] - 4.0) < 0.05]
+    assert {d["pitch"] for d in routed} == {52, 55, 59}
+    assert all(d["role"] == "rhythm" and d["source"] == "lead_chord" for d in routed)
+    out = report.to_dict()
+    assert out["config"]["min_run_bars"] == 2
+    assert len(out["notes"]) == len(report.notes)

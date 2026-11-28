@@ -347,3 +347,75 @@ class TestRunLeadRhythmSplit:
             src, tmp_path / "out", on_progress=lambda m, f: seen.append((m, f))
         )
         assert seen and all(0.0 <= f <= 1.0 for _, f in seen)
+
+
+class TestStereoPresplitInSplit:
+    """ATT_STEREO_PRESPLIT=1: the model gets the centre candidate; rhythm = full input - lead."""
+
+    def _run(self, tmp_path, monkeypatch, stereo, *, enabled: bool):
+        import soundfile as sf
+
+        from audio_to_tab import roformer
+        from audio_to_tab.lead_rhythm_sep import run_lead_rhythm_split
+
+        TestRunLeadRhythmSplit()._patch_runtime(monkeypatch, tmp_path)
+        if enabled:
+            monkeypatch.setenv("ATT_STEREO_PRESPLIT", "1")
+        else:
+            monkeypatch.delenv("ATT_STEREO_PRESPLIT", raising=False)
+        monkeypatch.setattr(roformer, "_load_audio_stereo", lambda path, sr: stereo.T.copy())
+        seen: dict = {}
+
+        def fake_demix(model, mix, *, device, chunk_size, n_overlap, num_stems):
+            seen["model_input"] = mix.copy()
+            return (0.5 * mix)[None]
+
+        monkeypatch.setattr(roformer, "_demix_track", fake_demix)
+        src = tmp_path / "guitar.wav"
+        sf.write(str(src), stereo, 44100)
+        artifacts, diag = run_lead_rhythm_split(src, tmp_path / "out")
+        lead, _ = sf.read(str(artifacts["lead_guitar"]), always_2d=True)
+        rhythm, _ = sf.read(str(artifacts["rhythm_guitar"]), always_2d=True)
+        return seen["model_input"], lead, rhythm, diag
+
+    @staticmethod
+    def _wide():
+        import numpy as np
+
+        rng = np.random.default_rng(1)
+        t = np.arange(44100) / 44100
+        sine = 0.3 * np.sin(2 * np.pi * 440 * t)
+        return np.column_stack(
+            [sine + 0.1 * rng.standard_normal(len(t)), sine + 0.1 * rng.standard_normal(len(t))]
+        ).astype(np.float32)
+
+    def test_wide_stem_feeds_the_centre_and_keeps_the_sides_in_rhythm(self, tmp_path, monkeypatch):
+        import numpy as np
+
+        stereo = self._wide()
+        model_input, lead, rhythm, diag = self._run(tmp_path, monkeypatch, stereo, enabled=True)
+
+        assert not np.allclose(model_input, stereo.T, atol=1e-3)
+        np.testing.assert_allclose(lead + rhythm, stereo, atol=2e-3)
+        assert diag.stereo_presplit["skipped"] is False
+        assert diag.to_dict()["stereo_presplit"]["reason"] == "split"
+
+    def test_near_mono_stem_passes_through(self, tmp_path, monkeypatch):
+        import numpy as np
+
+        t = np.arange(44100) / 44100
+        sine = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+        stereo = np.column_stack([sine, sine])
+        model_input, _, _, diag = self._run(tmp_path, monkeypatch, stereo, enabled=True)
+
+        np.testing.assert_allclose(model_input, stereo.T, atol=1e-6)
+        assert diag.stereo_presplit["skipped"] is True
+
+    def test_off_by_default(self, tmp_path, monkeypatch):
+        import numpy as np
+
+        stereo = self._wide()
+        model_input, _, _, diag = self._run(tmp_path, monkeypatch, stereo, enabled=False)
+
+        np.testing.assert_allclose(model_input, stereo.T, atol=1e-6)
+        assert diag.stereo_presplit is None

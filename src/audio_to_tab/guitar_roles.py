@@ -19,11 +19,13 @@ In isolated stems only textural cues survive, so this pass uses those, per bar:
   accompaniment repeat; solos usually don't — Pati & Lerch, AES 2017).
 
 Roles switch inside songs (lead changes every ~23 s live; Ou et al., ICASSP
-2025), so decisions are per bar, and a move needs either a neighbouring bar
-that agrees or strong evidence in the bar itself. Every move is reported with
-its reason; when the cues are ambiguous nothing moves (warn-only, no guessing).
-Bends/vibrato and foreground salience are not used: semitone MIDI has no bend
-evidence, and salience against the band is not recoverable from a stem.
+2025), so decisions are per bar, and a move needs either a run of at least
+``RoleConfig.min_run_bars`` bars that agree (hysteresis) or strong evidence in
+the bar itself. Every move is reported with its reason; when the cues are
+ambiguous nothing moves (warn-only, no guessing). Every note in the result is
+also reported with its role and where that role came from. Bends/vibrato and foreground salience are not used: semitone
+MIDI has no bend evidence, and salience against the band is not recoverable
+from a stem.
 """
 
 from __future__ import annotations
@@ -31,8 +33,8 @@ from __future__ import annotations
 import bisect
 import math
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
-from itertools import pairwise
+from dataclasses import asdict, dataclass, field
+from itertools import groupby, pairwise
 from typing import Protocol
 
 ONSET_GROUP_SEC = 0.05  # notes starting this close together form one event (chord)
@@ -47,7 +49,27 @@ EMPTY_EVENTS_MAX = 1  # the other stem counts as silent with at most this many o
 
 # None of these thresholds has been fitted to labelled segments yet; they are
 # written into lead_rhythm_roles.json so they can be tuned from real songs.
-CONSTANT_PROVENANCE: dict[str, str] = dict.fromkeys(("ONSET_GROUP_SEC", "BLEED_ONSET_SEC", "REPEAT_SIMILAR", "CHORD_FIT_MIN", "MELODIC_POLYPHONY_MAX", "CONTOUR_MIN", "MIN_LINE_EVENTS", "STRONG_LINE_EVENTS", "EMPTY_EVENTS_MAX"), "UNCALIBRATED: hand-set guess")
+CONSTANT_PROVENANCE: dict[str, str] = dict.fromkeys(("ONSET_GROUP_SEC", "BLEED_ONSET_SEC", "REPEAT_SIMILAR", "CHORD_FIT_MIN", "MELODIC_POLYPHONY_MAX", "CONTOUR_MIN", "MIN_LINE_EVENTS", "STRONG_LINE_EVENTS", "EMPTY_EVENTS_MAX", "MIN_RUN_BARS"), "UNCALIBRATED: hand-set guess")
+MIN_RUN_BARS = 2  # a weak bar moves only inside a run of this many bars that want the same move
+
+
+@dataclass(frozen=True)
+class RoleConfig:
+    """Every threshold of the role check in one place; the defaults are the constants above."""
+
+    onset_group_sec: float = ONSET_GROUP_SEC
+    bleed_onset_sec: float = BLEED_ONSET_SEC
+    repeat_similar: float = REPEAT_SIMILAR
+    chord_fit_min: float = CHORD_FIT_MIN
+    melodic_polyphony_max: float = MELODIC_POLYPHONY_MAX
+    contour_min: float = CONTOUR_MIN
+    min_line_events: int = MIN_LINE_EVENTS
+    strong_line_events: int = STRONG_LINE_EVENTS
+    empty_events_max: int = EMPTY_EVENTS_MAX
+    min_run_bars: int = MIN_RUN_BARS
+
+
+DEFAULT_ROLE_CONFIG = RoleConfig()
 
 _TRIADS: tuple[tuple[str, frozenset[int]], ...] = tuple(
     (f"{root}{kind}", frozenset({root % 12, (root + third) % 12, (root + 7) % 12}))
@@ -91,16 +113,23 @@ class RoleReport:
     bleed_removed: int = 0
     chords_to_rhythm: int = 0  # chord attacks from the lead stem given to rhythm
     chords_left: int = 0  # lead-stem chords left alone because rhythm was already playing
+    # Per-note role and source (split | moved_bar | lead_chord). No confidence: a score from
+    # the bar's texture cues was anti-predictive on GuitarSet (AUC 0.46, see
+    # docs/guitar-separation-eval.md), so none is reported.
+    notes: list[dict] = field(default_factory=list)
+    config: RoleConfig = DEFAULT_ROLE_CONFIG
 
     def to_dict(self) -> dict:
         return {
             "method": "bar-level texture cues (polyphony, chord outline, contour, repetition)",
             "constants": CONSTANT_PROVENANCE,
+            "config": asdict(self.config),
             "chords_to_rhythm": self.chords_to_rhythm,
             "chords_left_in_lead": self.chords_left,
             "bleed_removed": self.bleed_removed,
             "moves": [m.__dict__ for m in self.moves],
             "bars": self.bars,
+            "notes": self.notes,
         }
 
 
@@ -178,11 +207,11 @@ def _bar_index(starts: Sequence[float], t: float) -> int:
     return lo
 
 
-def _events(notes: Sequence[NoteLike]) -> list[list[NoteLike]]:
+def _events(notes: Sequence[NoteLike], group_sec: float = ONSET_GROUP_SEC) -> list[list[NoteLike]]:
     ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
     groups: list[list[NoteLike]] = []
     for note in ordered:
-        if groups and note.start - groups[-1][0].start <= ONSET_GROUP_SEC:
+        if groups and note.start - groups[-1][0].start <= group_sec:
             groups[-1].append(note)
         else:
             groups.append([note])
@@ -218,7 +247,10 @@ def _jaccard(a: frozenset, b: frozenset) -> float:
 
 
 def bar_features(
-    notes: Sequence[NoteLike], starts: Sequence[float], end_time: float
+    notes: Sequence[NoteLike],
+    starts: Sequence[float],
+    end_time: float,
+    cfg: RoleConfig = DEFAULT_ROLE_CONFIG,
 ) -> list[BarFeatures]:
     """Texture features for every bar of one stem."""
     per_bar: list[list[NoteLike]] = [[] for _ in starts]
@@ -231,7 +263,7 @@ def bar_features(
     prints = [_fingerprint(b, starts[i], lengths[i]) for i, b in enumerate(per_bar)]
     out: list[BarFeatures] = []
     for i, bar_notes in enumerate(per_bar):
-        events = _events(bar_notes)
+        events = _events(bar_notes, cfg.onset_group_sec)
         n_events = len(events)
         tops = [max(e, key=lambda n: n.pitch).pitch for e in events]
         steps = [abs(b - a) for a, b in pairwise(tops)]
@@ -253,18 +285,35 @@ def bar_features(
     return out
 
 
-def texture_label(f: BarFeatures) -> str:
+def texture_label(f: BarFeatures, cfg: RoleConfig = DEFAULT_ROLE_CONFIG) -> str:
     """'silent', 'chords', 'line' (single-note), 'arpeggio' (chord spelled out) or 'mixed'."""
-    if f.events <= EMPTY_EVENTS_MAX:
+    if f.events <= cfg.empty_events_max:
         return "silent"
     if f.chord_ratio >= 0.5:
         return "chords"
-    if f.polyphony <= MELODIC_POLYPHONY_MAX:
-        return "arpeggio" if f.chord_fit >= CHORD_FIT_MIN else "line"
+    if f.polyphony <= cfg.melodic_polyphony_max:
+        return "arpeggio" if f.chord_fit >= cfg.chord_fit_min else "line"
     return "mixed"
 
 
-def remove_bleed(lead: list, rhythm: list) -> tuple[list, int]:
+def accept_moves(
+    candidates: Sequence[tuple[str, str, bool] | None], min_run_bars: int = MIN_RUN_BARS
+) -> list[tuple[str, str] | None]:
+    """Hysteresis: a strong candidate moves on its own, a weak one only inside a run of
+    at least ``min_run_bars`` consecutive bars that want the same move."""
+    accepted: list[tuple[str, str] | None] = []
+    for kind, run in groupby(candidates, key=lambda c: c[0] if c else None):
+        bars = list(run)
+        for cand in bars:
+            if cand is None or kind is None:
+                accepted.append(None)
+                continue
+            _, reason, strong = cand
+            accepted.append((kind, reason) if strong or len(bars) >= min_run_bars else None)
+    return accepted
+
+
+def remove_bleed(lead: list, rhythm: list, cfg: RoleConfig = DEFAULT_ROLE_CONFIG) -> tuple[list, int]:
     """Drop rhythm notes that repeat a lead note on their own (the lead heard in the residual).
 
     A same-pitch copy that sits inside a rhythm chord stays: the chord needs it.
@@ -278,12 +327,12 @@ def remove_bleed(lead: list, rhythm: list) -> tuple[list, int]:
         neighbours = sum(
             1
             for j in range(max(0, i - 6), min(len(onsets), i + 7))
-            if j != i and abs(onsets[j] - note.start) <= ONSET_GROUP_SEC
+            if j != i and abs(onsets[j] - note.start) <= cfg.onset_group_sec
         )
         duplicate = any(
-            pitch == note.pitch and abs(start - note.start) <= BLEED_ONSET_SEC
+            pitch == note.pitch and abs(start - note.start) <= cfg.bleed_onset_sec
             for start, pitch in lead_keys
-            if abs(start - note.start) <= BLEED_ONSET_SEC
+            if abs(start - note.start) <= cfg.bleed_onset_sec
         )
         if duplicate and neighbours == 0:
             removed += 1
@@ -293,7 +342,7 @@ def remove_bleed(lead: list, rhythm: list) -> tuple[list, int]:
 
 
 def route_lead_chords(
-    lead: list, rhythm: list, chords: Sequence[Sequence]
+    lead: list, rhythm: list, chords: Sequence[Sequence], cfg: RoleConfig = DEFAULT_ROLE_CONFIG
 ) -> tuple[list, list, int, int]:
     """Give chord attacks found in the lead stem to rhythm (rhythm tends to play chords).
 
@@ -313,8 +362,8 @@ def route_lead_chords(
         if not chord:
             continue
         t0 = min(n.start for n in chord)
-        i = bisect.bisect_left(rhythm_onsets, t0 - BLEED_ONSET_SEC)
-        if i < len(rhythm_onsets) and rhythm_onsets[i] <= t0 + BLEED_ONSET_SEC:
+        i = bisect.bisect_left(rhythm_onsets, t0 - cfg.bleed_onset_sec)
+        if i < len(rhythm_onsets) and rhythm_onsets[i] <= t0 + cfg.bleed_onset_sec:
             left += 1
             continue
         moved += 1
@@ -325,7 +374,7 @@ def route_lead_chords(
     kept_lead = [
         n
         for n in lead
-        if not any(abs(n.start - t0) <= ONSET_GROUP_SEC and n.pitch in pitches for t0, pitches in drop)
+        if not any(abs(n.start - t0) <= cfg.onset_group_sec and n.pitch in pitches for t0, pitches in drop)
     ]
     new_rhythm = sorted([*rhythm, *moved_notes], key=lambda n: (n.start, n.pitch))
     return kept_lead, new_rhythm, moved, left
@@ -340,19 +389,23 @@ def assign_roles(
     tempo_bpm: float = 120.0,
     beats_per_measure: int = 4,
     lead_chords: Sequence[Sequence] = (),
+    config: RoleConfig = DEFAULT_ROLE_CONFIG,
 ) -> tuple[list, list, RoleReport]:
     """Return corrected (lead, rhythm) note lists and a report of what moved and why.
 
     ``lead_chords`` are whole chord attacks the lead stem held (its monophonic path
     kept one note of each); they go to rhythm first, since rhythm tends to play chords.
     """
+    cfg = config
     lead_notes = list(lead)
     rhythm_notes = list(rhythm)
-    report = RoleReport()
+    original_rhythm = {id(n) for n in rhythm_notes}
+    report = RoleReport(config=cfg)
     lead_notes, rhythm_notes, report.chords_to_rhythm, report.chords_left = route_lead_chords(
-        lead_notes, rhythm_notes, lead_chords
+        lead_notes, rhythm_notes, lead_chords, cfg
     )
-    rhythm_notes, report.bleed_removed = remove_bleed(lead_notes, rhythm_notes)
+    chord_routed = {id(n) for n in rhythm_notes} - original_rhythm
+    rhythm_notes, report.bleed_removed = remove_bleed(lead_notes, rhythm_notes, cfg)
 
     end_time = max((n.end for n in [*lead_notes, *rhythm_notes]), default=0.0)
     if end_time <= 0:
@@ -364,51 +417,39 @@ def assign_roles(
         end_time=end_time,
         beats=beats,
     )
-    lead_f = bar_features(lead_notes, starts, end_time)
-    rhythm_f = bar_features(rhythm_notes, starts, end_time)
+    lead_f = bar_features(lead_notes, starts, end_time, cfg)
+    rhythm_f = bar_features(rhythm_notes, starts, end_time, cfg)
 
     # Candidate moves per bar: ("to_lead" | "to_rhythm", reason, strong).
     candidates: list[tuple[str, str, bool] | None] = []
     for lf, rf in zip(lead_f, rhythm_f, strict=True):
-        lead_tex, rhythm_tex = texture_label(lf), texture_label(rf)
+        lead_tex, rhythm_tex = texture_label(lf, cfg), texture_label(rf, cfg)
         move: tuple[str, str, bool] | None = None
         if (
             lead_tex == "silent"
             and rhythm_tex == "line"
-            and rf.events >= MIN_LINE_EVENTS
-            and rf.contour >= CONTOUR_MIN
-            and rf.repeat < REPEAT_SIMILAR
+            and rf.events >= cfg.min_line_events
+            and rf.contour >= cfg.contour_min
+            and rf.repeat < cfg.repeat_similar
         ):
             move = (
                 "to_lead",
                 "single-note line that moves stepwise and doesn't repeat, with no lead playing",
-                rf.events >= STRONG_LINE_EVENTS,
+                rf.events >= cfg.strong_line_events,
             )
         elif (
             rhythm_tex == "silent"
             and lead_tex == "arpeggio"
-            and lf.repeat >= REPEAT_SIMILAR
+            and lf.repeat >= cfg.repeat_similar
         ):
             move = (
                 "to_rhythm",
                 "repeating figure that spells out a chord, with no rhythm guitar playing",
-                lf.events >= STRONG_LINE_EVENTS,
+                lf.events >= cfg.strong_line_events,
             )
         candidates.append(move)
 
-    accepted: list[tuple[str, str] | None] = []
-    for i, cand in enumerate(candidates):
-        if cand is None:
-            accepted.append(None)
-            continue
-        kind, reason, strong = cand
-        prev_same = i > 0 and candidates[i - 1] is not None and candidates[i - 1][0] == kind
-        next_same = (
-            i + 1 < len(candidates)
-            and candidates[i + 1] is not None
-            and candidates[i + 1][0] == kind
-        )
-        accepted.append((kind, reason) if strong or prev_same or next_same else None)
+    accepted = accept_moves(candidates, cfg.min_run_bars)
 
     moved_to_lead: list = []
     moved_to_rhythm: list = []
@@ -421,6 +462,28 @@ def assign_roles(
         a = accepted[_bar_index(starts, n.start)]
         (moved_to_rhythm if a and a[0] == "to_rhythm" else keep_lead).append(n)
 
+    def note_entry(n, role: str, source: str) -> dict:
+        return {
+            "start": round(n.start, 3),
+            "pitch": n.pitch,
+            "bar": _bar_index(starts, n.start) + 1,
+            "role": role,
+            "source": source,
+        }
+
+    report.notes = sorted(
+        [
+            *(note_entry(n, "lead", "split") for n in keep_lead),
+            *(note_entry(n, "lead", "moved_bar") for n in moved_to_lead),
+            *(
+                note_entry(n, "rhythm", "lead_chord" if id(n) in chord_routed else "split")
+                for n in keep_rhythm
+            ),
+            *(note_entry(n, "rhythm", "moved_bar") for n in moved_to_rhythm),
+        ],
+        key=lambda d: (d["start"], d["pitch"]),
+    )
+
     for i, (lf, rf) in enumerate(zip(lead_f, rhythm_f, strict=True)):
         end = starts[i + 1] if i + 1 < len(starts) else end_time
         decision = accepted[i]
@@ -428,8 +491,8 @@ def assign_roles(
             {
                 "bar": i + 1,
                 "start": round(starts[i], 3),
-                "lead_texture": texture_label(lf),
-                "rhythm_texture": texture_label(rf),
+                "lead_texture": texture_label(lf, cfg),
+                "rhythm_texture": texture_label(rf, cfg),
                 "lead_repeat": round(lf.repeat, 2),
                 "rhythm_repeat": round(rf.repeat, 2),
                 "moved": decision[0] if decision else None,

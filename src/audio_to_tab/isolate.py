@@ -2276,18 +2276,43 @@ def _run_lead_rhythm_split_isolation(
     out_dir: Path,
     progress: ProgressCallback,
 ) -> dict[str, Path]:
-    """Lead/rhythm split mode: guitar-ft pre-pass (unless input is already a
+    """Lead/rhythm split mode: guitar pre-pass (unless input is already a
     guitar stem) → Mel-Band RoFormer Lead/Rhythm split → stems + diagnostics.
 
+    The pre-pass is BS-RoFormer SW when it can run here (see
+    ``split_stage1_skip_reason``), else — or if it fails — guitar-ft Demucs.
     No Demucs post-processing (fold/refine/bleed-gate) applies: the split
-    model consumes a single guitar stem. Fails loudly; no fallback.
+    model consumes a single guitar stem. The split itself fails loudly; no fallback.
     """
     from audio_to_tab import lead_rhythm_sep
+    from audio_to_tab.roformer import split_stage1_skip_reason
     from audio_to_tab.separate import separate_guitar_stem
 
     out_dir.mkdir(parents=True, exist_ok=True)
     guitar_stem = out_dir / "guitar_stem.wav"
-    if cfg.lead_rhythm_pre_pass:
+    roformer_done = False
+    if (
+        cfg.lead_rhythm_pre_pass
+        and cfg.guitar_checkpoint is None
+        and split_stage1_skip_reason(cfg.device) is None
+    ):
+        progress("separate", "Isolating guitar stem with BS-RoFormer")
+        try:
+            separate_guitar_stem(
+                src,
+                guitar_stem,
+                model=BS_ROFORMER_SW_ID,
+                device=cfg.device,
+                on_progress=lambda message, fraction: progress("separate", message),
+            )
+            roformer_done = True
+        except JobAborted:
+            raise
+        except Exception as exc:
+            logger.warning("BS-RoFormer SW pre-pass failed; using guitar-ft Demucs: %s", exc)
+    if roformer_done:
+        progress("separate", "Guitar stem isolated with BS-RoFormer")
+    elif cfg.lead_rhythm_pre_pass:
         progress("separate", "Isolating guitar stem with guitar-ft Demucs")
         checkpoint = cfg.guitar_checkpoint or GUITAR_FT_CHECKPOINT_ID
         separate_guitar_stem(
